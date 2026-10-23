@@ -12,12 +12,19 @@
  */
 
 import { extractTranslatableBlocks, TranslatableBlock } from './dom/extractor';
-import { injectLoadingState, injectTranslation, clearAllTranslations } from './dom/injector';
+import { injectLoadingState, injectTranslation, removeTranslation, clearAllTranslations } from './dom/injector';
 import { partitionBlocksByViewport } from './dom/viewport';
 import { extractSentenceFromSelection, cleanWord } from './selection/sentence-extractor';
 import { SelectionFloatingCard } from './selection/floating-card';
 import { TargetLanguage, TranslationMode, RuntimeMessage, TranslateBatchResponse } from '../types';
 import { WordLookupResult } from '../background/dictionary';
+
+/**
+ * 校验扩展上下文生命周期状态（避免扩展被开发者刷新后旧标签页 Content Script 失效报红）
+ */
+function isExtensionValid(): boolean {
+  return typeof chrome !== 'undefined' && !!chrome.runtime && !!chrome.runtime.id;
+}
 
 let isPageTranslated = false;
 let isTranslating = false;
@@ -106,22 +113,48 @@ async function translateAndMountBlocks(
   targetLang: TargetLanguage
 ): Promise<void> {
   if (blocks.length === 0 || !isPageTranslated) return;
+  if (!isExtensionValid()) {
+    stopDynamicObserver();
+    return;
+  }
   const texts = blocks.map((b) => b.originalText);
 
   try {
     const response = await new Promise<TranslateBatchResponse>((resolve) => {
-      chrome.runtime.sendMessage(
-        {
-          type: 'TRANSLATE_BATCH',
-          texts,
-          toLang: targetLang
-        },
-        (res: TranslateBatchResponse) => resolve(res)
-      );
+      try {
+        if (!isExtensionValid()) {
+          stopDynamicObserver();
+          return resolve({ translations: [] });
+        }
+        chrome.runtime.sendMessage(
+          {
+            type: 'TRANSLATE_BATCH',
+            texts,
+            toLang: targetLang
+          },
+          (res: TranslateBatchResponse) => {
+            if (chrome.runtime.lastError) {
+              const msg = chrome.runtime.lastError.message || '';
+              if (msg.includes('Extension context invalidated')) {
+                stopDynamicObserver();
+                return resolve({ translations: [] });
+              }
+            }
+            resolve(res);
+          }
+        );
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (msg.includes('Extension context invalidated')) {
+          stopDynamicObserver();
+          return resolve({ translations: [] });
+        }
+        throw e;
+      }
     });
 
-    // 关键守卫：如果在网络请求期间用户已触发还原原文，立即丢弃，绝不在清空后重新挂载
-    if (!isPageTranslated) {
+    // 关键守卫：如果在网络请求期间用户已触发还原原文或扩展已卸载，立即丢弃
+    if (!isPageTranslated || !isExtensionValid()) {
       return;
     }
 
@@ -140,6 +173,11 @@ async function translateAndMountBlocks(
       blocks.forEach((block) => block.element.classList.remove('translate-king-replacing-pulse'));
     }
   } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    if (errMsg.includes('Extension context invalidated')) {
+      stopDynamicObserver();
+      return;
+    }
     console.error('[TranslateKing] 批次翻译错误:', err);
     blocks.forEach((block) => block.element.classList.remove('translate-king-replacing-pulse'));
   }
@@ -167,7 +205,7 @@ function startDynamicObserver(): void {
     if (mutationDebounceTimer) clearTimeout(mutationDebounceTimer);
     // 50ms 极速防抖：在用户滑动滚轮但还未看清的间隙，提前捕获并处理
     mutationDebounceTimer = setTimeout(async () => {
-      if (!isPageTranslated || isProcessingMutations) return;
+      if (!isPageTranslated || isProcessingMutations || !isExtensionValid()) return;
       isProcessingMutations = true;
       try {
         const newBlocks = extractTranslatableBlocks(document);
@@ -189,7 +227,7 @@ function startDynamicObserver(): void {
             if (offscreenBlocks.length > 0) {
               const CHUNK_SIZE = 30;
               for (let i = 0; i < offscreenBlocks.length; i += CHUNK_SIZE) {
-                if (!isPageTranslated) break;
+                if (!isPageTranslated || !isExtensionValid()) break;
                 const chunk = offscreenBlocks.slice(i, i + CHUNK_SIZE);
                 await translateAndMountBlocks(chunk, activeTargetLang);
               }
@@ -197,6 +235,11 @@ function startDynamicObserver(): void {
           }
         }
       } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        if (errMsg.includes('Extension context invalidated')) {
+          stopDynamicObserver();
+          return;
+        }
         console.error('[TranslateKing] 动态增量预翻译异常:', err);
       } finally {
         isProcessingMutations = false;
@@ -295,6 +338,11 @@ async function translateFullPage(
     await Promise.all([visiblePromise, offscreenPromise]);
     console.log('[TranslateKing] 全文所有段落激进预翻译已全部就绪！向下滚动完全无感直接阅读！');
   } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    if (errMsg.includes('Extension context invalidated')) {
+      stopDynamicObserver();
+      return;
+    }
     console.error('[TranslateKing] 全页翻译异常:', err);
   } finally {
     isTranslating = false;
@@ -358,7 +406,7 @@ window.addEventListener('popstate', () => {
 // 鼠标划词悬浮释义与语境捕获逻辑 (支持中英双向智能互译)
 // -----------------------------------------------------------------
 document.addEventListener('mouseup', (e) => {
-  if (!enableSelection) {
+  if (!enableSelection || !isExtensionValid()) {
     return;
   }
 
@@ -412,21 +460,29 @@ document.addEventListener('mouseup', (e) => {
   card.showLoading(range, word);
 
   // 2. 向后台发送查词与原句语境翻译指令
-  chrome.runtime.sendMessage(
-    {
-      type: 'LOOKUP_WORD',
-      word,
-      sentence,
-      targetLang: lookupTargetLang
-    },
-    (result: WordLookupResult) => {
-      if (chrome.runtime.lastError || !result) {
-        card.hide();
-        return;
-      }
-      card.showResult(range, result);
+  try {
+    if (!isExtensionValid()) {
+      card.hide();
+      return;
     }
-  );
+    chrome.runtime.sendMessage(
+      {
+        type: 'LOOKUP_WORD',
+        word,
+        sentence,
+        targetLang: lookupTargetLang
+      },
+      (result: WordLookupResult) => {
+        if (!isExtensionValid() || chrome.runtime.lastError || !result) {
+          card.hide();
+          return;
+        }
+        card.showResult(range, result);
+      }
+    );
+  } catch (_) {
+    card.hide();
+  }
 });
 
 // 监听来自扩展 Popup / Background 的指令

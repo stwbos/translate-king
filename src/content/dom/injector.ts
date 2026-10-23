@@ -54,6 +54,60 @@ function isInteractiveButton(el: HTMLElement): boolean {
 }
 
 /**
+ * 移除目标元素中的翻译王译文容器（恢复纯净原文）
+ */
+export function removeTranslation(element: HTMLElement): void {
+  // 1. 清理双语对照容器
+  const existing = element.querySelectorAll('.translate-king-wrapper');
+  existing.forEach((node) => node.remove());
+
+  // 2. 移除替换模式动效类
+  element.classList.remove('translate-king-replacing-pulse');
+
+  // 3. 恢复直接替换模式的原始文本
+  if (element.hasAttribute('data-tk-orig-html')) {
+    element.innerHTML = element.getAttribute('data-tk-orig-html') || '';
+    element.removeAttribute('data-tk-orig-html');
+  } else if (element.hasAttribute('data-tk-orig-text')) {
+    const orig = element.getAttribute('data-tk-orig-text');
+    if (orig !== null) {
+      const doc = element.ownerDocument || (typeof document !== 'undefined' ? document : null);
+      if (doc) {
+        // 先还原后续多 span 的 extraText
+        if (element.hasAttribute('data-tk-extra-text')) {
+          try {
+            const extraData = JSON.parse(element.getAttribute('data-tk-extra-text') || '[]') as string[];
+            const allTextNodes: Text[] = [];
+            const walker = doc.createTreeWalker(element, SHOW_TEXT_FILTER);
+            let curr: Text | null = null;
+            while ((curr = walker.nextNode() as Text | null)) {
+              allTextNodes.push(curr);
+            }
+            for (let i = 0; i < extraData.length && i + 1 < allTextNodes.length; i++) {
+              allTextNodes[i + 1].nodeValue = extraData[i];
+            }
+          } catch {
+            // ignore
+          }
+          element.removeAttribute('data-tk-extra-text');
+        }
+
+        const primaryTextNode = findPrimaryTextNode(element, doc);
+        if (primaryTextNode) {
+          primaryTextNode.nodeValue = orig;
+        } else {
+          element.textContent = orig;
+        }
+      } else {
+        element.textContent = orig;
+      }
+    }
+    element.removeAttribute('data-tk-orig-text');
+  }
+  element.removeAttribute('data-tk-replaced');
+}
+
+/**
  * 基于 <xN> 占位符将翻译后的 HTML 片段重构为 DOM Fragment
  * 严格保留原始 DOM 节点的各类属性（href, class, title, rel, id 等）及可点击交互能力
  */
@@ -282,60 +336,6 @@ export function injectTranslation(
 
   wrapper.appendChild(textNode);
   block.element.appendChild(wrapper);
-}
-
-/**
- * 移除目标元素中的翻译王译文容器（恢复纯净原文）
- */
-export function removeTranslation(element: HTMLElement): void {
-  // 1. 清理双语对照容器
-  const existing = element.querySelectorAll('.translate-king-wrapper');
-  existing.forEach((node) => node.remove());
-
-  // 2. 移除替换模式动效类
-  element.classList.remove('translate-king-replacing-pulse');
-
-  // 3. 恢复直接替换模式的原始文本
-  if (element.hasAttribute('data-tk-orig-html')) {
-    element.innerHTML = element.getAttribute('data-tk-orig-html') || '';
-    element.removeAttribute('data-tk-orig-html');
-  } else if (element.hasAttribute('data-tk-orig-text')) {
-    const orig = element.getAttribute('data-tk-orig-text');
-    if (orig !== null) {
-      const doc = element.ownerDocument || (typeof document !== 'undefined' ? document : null);
-      if (doc) {
-        // 先还原后续多 span 的 extraText
-        if (element.hasAttribute('data-tk-extra-text')) {
-          try {
-            const extraData = JSON.parse(element.getAttribute('data-tk-extra-text') || '[]') as string[];
-            const allTextNodes: Text[] = [];
-            const walker = doc.createTreeWalker(element, SHOW_TEXT_FILTER);
-            let curr: Text | null = null;
-            while ((curr = walker.nextNode() as Text | null)) {
-              allTextNodes.push(curr);
-            }
-            for (let i = 0; i < extraData.length && i + 1 < allTextNodes.length; i++) {
-              allTextNodes[i + 1].nodeValue = extraData[i];
-            }
-          } catch {
-            // ignore
-          }
-          element.removeAttribute('data-tk-extra-text');
-        }
-
-        const primaryTextNode = findPrimaryTextNode(element, doc);
-        if (primaryTextNode) {
-          primaryTextNode.nodeValue = orig;
-        } else {
-          element.textContent = orig;
-        }
-      } else {
-        element.textContent = orig;
-      }
-    }
-    element.removeAttribute('data-tk-orig-text');
-  }
-  element.removeAttribute('data-tk-replaced');
 }
 
 /**
