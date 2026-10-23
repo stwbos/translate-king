@@ -26,4 +26,23 @@ describe('词典与语境服务 (Dictionary Service)', () => {
     expect(res1.meaning).toBe(res2.meaning);
     expect(cost2).toBeLessThan(5); // 缓存读取 < 5ms
   });
+
+  it('能成功查询中文词汇并返回拼音与英文释义及原句英文翻译', async () => {
+    const result = await lookupWord('苹果', '每天吃一个苹果有益健康。', 'en');
+    expect(result.word).toBe('苹果');
+    // 音标字段应包含拼音
+    expect(result.phonetic).toContain('píng');
+    // 释义中应包含 apple
+    expect(/apple/i.test(result.meaning)).toBe(true);
+    // 原句翻译应为英文
+    expect(/[a-zA-Z]/.test(result.sentenceTranslation)).toBe(true);
+  }, 10000);
+
+  it('中文长短语未被词典直接收录时自动降级至翻译网关翻译为英文', async () => {
+    const phrase = '人工智能正在改变世界';
+    const result = await lookupWord(phrase, `${phrase}，这是不可逆转的趋势。`, 'en');
+    expect(result.word).toBe(phrase);
+    expect(/[a-zA-Z]/.test(result.meaning)).toBe(true);
+    expect(/[a-zA-Z]/.test(result.sentenceTranslation)).toBe(true);
+  }, 10000);
 });

@@ -148,12 +148,12 @@ export class SelectionFloatingCard {
         padding-top: 8px;
         margin-bottom: 8px;
       }
-      .sentence-en {
+      .sentence-source, .sentence-en {
         color: #334155;
         margin-bottom: 4px;
         font-style: italic;
       }
-      .sentence-zh {
+      .sentence-target, .sentence-zh {
         color: #64748b;
       }
       .footer {
@@ -235,8 +235,8 @@ export class SelectionFloatingCard {
 
       ${hasSentence ? `
         <div class="sentence-box">
-          <div class="sentence-en">“${result.sentence}”</div>
-          ${result.sentenceTranslation ? `<div class="sentence-zh">${result.sentenceTranslation}</div>` : ''}
+          <div class="sentence-source">“${result.sentence}”</div>
+          ${result.sentenceTranslation ? `<div class="sentence-target">${result.sentenceTranslation}</div>` : ''}
         </div>
       ` : ''}
 
@@ -300,12 +300,15 @@ export class SelectionFloatingCard {
 
   /**
    * 双轨发音核心：优先原生高清真人原声流，告别沙哑机械音；离线时降级自然高品质人声
+   * 支持中英文自动识别与配对音色
    */
   private speakWord(text: string): void {
     const cleanWord = text.trim();
     if (!cleanWord) return;
 
-    // 1. 优先尝试真人原生美音音频流（录音棚原声，发音清晰饱满，彻底告别沙哑机械音）
+    const isChinese = /[\u4e00-\u9fa5]/.test(cleanWord);
+
+    // 1. 优先尝试真人原生音频流（录音棚原声，发音清晰饱满，彻底告别沙哑机械音）
     if (typeof Audio !== 'undefined') {
       try {
         if (this.currentAudio) {
@@ -316,7 +319,10 @@ export class SelectionFloatingCard {
           this.currentAudio = null;
         }
 
-        const audioUrl = `https://dict.youdao.com/dictvoice?audio=${encodeURIComponent(cleanWord)}&type=2`;
+        const audioUrl = isChinese
+          ? `https://dict.youdao.com/dictvoice?audio=${encodeURIComponent(cleanWord)}&le=zh`
+          : `https://dict.youdao.com/dictvoice?audio=${encodeURIComponent(cleanWord)}&type=2`;
+
         const audio = new Audio(audioUrl);
         this.currentAudio = audio;
         let fallbackTriggered = false;
@@ -324,7 +330,7 @@ export class SelectionFloatingCard {
         const triggerFallback = () => {
           if (!fallbackTriggered) {
             fallbackTriggered = true;
-            this.fallbackSpeechSynthesis(cleanWord);
+            this.fallbackSpeechSynthesis(cleanWord, isChinese);
           }
         };
 
@@ -339,8 +345,8 @@ export class SelectionFloatingCard {
       }
     }
 
-    // 2. 降级使用高质量系统语音合成 (智能优选自然音色，严格排除 Fred 等沙哑音色)
-    this.fallbackSpeechSynthesis(cleanWord);
+    // 2. 降级使用高质量系统语音合成 (智能优选自然音色)
+    this.fallbackSpeechSynthesis(cleanWord, isChinese);
   }
 
   /**
@@ -384,22 +390,30 @@ export class SelectionFloatingCard {
   }
 
   /**
-   * 系统语音合成兜底方案，确保首次发音即为自然人声，彻底告别 Fred 沙哑声
+   * 系统语音合成兜底方案，确保自然人声
    */
-  private fallbackSpeechSynthesis(text: string): void {
+  private fallbackSpeechSynthesis(text: string, isChinese = false): void {
     if (!text || typeof window === 'undefined' || !window.speechSynthesis) return;
     try {
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = 'en-US';
       utterance.rate = 0.95;
       utterance.pitch = 1.0;
 
       const voices = window.speechSynthesis.getVoices() || [];
-      if (voices.length > 0) {
-        const selected = this.pickPreferredVoice(voices);
-        if (selected) {
-          utterance.voice = selected;
+      if (isChinese) {
+        utterance.lang = 'zh-CN';
+        const zhVoice = voices.find((v) =>
+          v && v.lang && (v.lang.startsWith('zh') || v.lang === 'cmn-Hans-CN')
+        );
+        if (zhVoice) utterance.voice = zhVoice;
+      } else {
+        utterance.lang = 'en-US';
+        if (voices.length > 0) {
+          const selected = this.pickPreferredVoice(voices);
+          if (selected) {
+            utterance.voice = selected;
+          }
         }
       }
 

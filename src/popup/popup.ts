@@ -9,15 +9,21 @@ document.addEventListener('DOMContentLoaded', async () => {
   const btnText = document.getElementById('btnText') as HTMLSpanElement;
   const targetLangSelect = document.getElementById('targetLang') as HTMLSelectElement;
   const translationModeSelect = document.getElementById('translationMode') as HTMLSelectElement;
+  const enableSelectionToggle = document.getElementById('enableSelection') as HTMLInputElement;
   const statusText = document.getElementById('statusText') as HTMLSpanElement;
 
-  // 1. 读取保存的语言与模式偏好
-  const saved = await chrome.storage.local.get(['targetLang', 'translationMode']);
+  // 1. 读取保存的语言、模式与划词偏好
+  const saved = await chrome.storage.local.get(['targetLang', 'translationMode', 'enableSelection']);
   if (saved.targetLang) {
     targetLangSelect.value = saved.targetLang;
   }
   if (saved.translationMode) {
     translationModeSelect.value = saved.translationMode;
+  }
+  if (typeof saved.enableSelection === 'boolean') {
+    enableSelectionToggle.checked = saved.enableSelection;
+  } else {
+    enableSelectionToggle.checked = true; // 默认开启
   }
 
   targetLangSelect.addEventListener('change', () => {
@@ -27,6 +33,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   translationModeSelect.addEventListener('change', () => {
     chrome.storage.local.set({ translationMode: translationModeSelect.value });
     updateBtnLabel();
+  });
+
+  enableSelectionToggle.addEventListener('change', () => {
+    chrome.storage.local.set({ enableSelection: enableSelectionToggle.checked });
   });
 
   function updateBtnLabel(isTranslated = toggleBtn.classList.contains('is-active')) {

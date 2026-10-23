@@ -26,7 +26,7 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
   }
 
   if (message.type === 'LOOKUP_WORD') {
-    lookupWord(message.word, message.sentence)
+    lookupWord(message.word, message.sentence, message.targetLang)
       .then((res) => sendResponse(res))
       .catch((err) => {
         sendResponse({

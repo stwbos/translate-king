@@ -49,6 +49,7 @@ export interface LookupWordMessage {
   type: 'LOOKUP_WORD';
   word: string;
   sentence: string;
+  targetLang?: TargetLanguage;
 }
 
 export interface SavedVocabularyItem {

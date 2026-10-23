@@ -23,24 +23,42 @@ let isPageTranslated = false;
 let isTranslating = false;
 let activeTargetLang: TargetLanguage = 'zh-CN';
 let activeTranslationMode: TranslationMode = 'bilingual';
+let enableSelection = true;
 
-// 初始化读取用户偏好的翻译显示模式（双语对照 vs 纯中文直接替换）
+// 初始化读取用户偏好配置（翻译显示模式、目标语言、鼠标划词开关）
 if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-  chrome.storage.local.get(['translationMode'], (data) => {
+  chrome.storage.local.get(['translationMode', 'targetLang', 'enableSelection'], (data) => {
     if (data.translationMode) {
       activeTranslationMode = data.translationMode;
+    }
+    if (data.targetLang) {
+      activeTargetLang = data.targetLang;
+    }
+    if (typeof data.enableSelection === 'boolean') {
+      enableSelection = data.enableSelection;
     }
   });
 
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === 'local' && changes.translationMode) {
-      const newMode = changes.translationMode.newValue as TranslationMode;
-      if (newMode && newMode !== activeTranslationMode) {
-        activeTranslationMode = newMode;
-        if (isPageTranslated) {
-          clearAllTranslations(document);
-          translateFullPage(activeTargetLang, activeTranslationMode);
+    if (area === 'local') {
+      if (changes.translationMode) {
+        const newMode = changes.translationMode.newValue as TranslationMode;
+        if (newMode && newMode !== activeTranslationMode) {
+          activeTranslationMode = newMode;
+          if (isPageTranslated) {
+            clearAllTranslations(document);
+            translateFullPage(activeTargetLang, activeTranslationMode);
+          }
         }
+      }
+      if (changes.targetLang) {
+        const newLang = changes.targetLang.newValue as TargetLanguage;
+        if (newLang) {
+          activeTargetLang = newLang;
+        }
+      }
+      if (changes.enableSelection) {
+        enableSelection = changes.enableSelection.newValue !== false;
       }
     }
   });
@@ -337,9 +355,13 @@ window.addEventListener('popstate', () => {
 });
 
 // -----------------------------------------------------------------
-// 鼠标划词悬浮释义与语境捕获逻辑 (借鉴 context-vocab 核心架构)
+// 鼠标划词悬浮释义与语境捕获逻辑 (支持中英双向智能互译)
 // -----------------------------------------------------------------
 document.addEventListener('mouseup', (e) => {
+  if (!enableSelection) {
+    return;
+  }
+
   // 若点击在卡片宿主元素内，不触发重新查询
   const host = document.getElementById('translate-king-bubble-host');
   if (host && host.contains(e.target as Node)) {
@@ -353,11 +375,33 @@ document.addEventListener('mouseup', (e) => {
 
   const rawText = selection.toString().trim();
   const word = cleanWord(rawText);
-
-  // 仅对 1~4 个单词的外文短语触发查词（避免选中整段长文时弹窗挡视线）
-  const wordCount = word.split(/\s+/).length;
-  if (!word || wordCount > 4 || !/[a-zA-Z]/.test(word)) {
+  if (!word) {
     return;
+  }
+
+  const hasChinese = /[\u4e00-\u9fa5]/.test(word);
+  const wordCount = word.split(/\s+/).length;
+
+  if (hasChinese) {
+    // 中文选词：限制在 1 ~ 30 个字以内（避免选中长篇大论时弹窗挡住阅读视线）
+    if (word.length > 30) {
+      return;
+    }
+  } else {
+    // 字母/外文选词：限制在 1 ~ 6 个单词且 <= 60 字符（排除纯标点符号）
+    if (wordCount > 6 || word.length > 60 || !/[\p{L}\p{N}]/u.test(word)) {
+      return;
+    }
+  }
+
+  // 智能推断目标语言：
+  // 1. 中文源词句：默认翻译为当前选定的目标语言；若当前选定的目标语言是中文，则自动互译为英文 (en)
+  // 2. 外文源词句：若全局目标语言是 en 且选中的也是英文，则互译为中文 (zh-CN)；否则使用全局目标语言
+  let lookupTargetLang: TargetLanguage = activeTargetLang;
+  if (hasChinese) {
+    lookupTargetLang = (activeTargetLang === 'zh-CN' || activeTargetLang === 'zh-TW') ? 'en' : activeTargetLang;
+  } else if (lookupTargetLang === 'en' && /^[a-zA-Z\s.,'-]+$/.test(word)) {
+    lookupTargetLang = 'zh-CN';
   }
 
   const range = selection.getRangeAt(0);
@@ -372,7 +416,8 @@ document.addEventListener('mouseup', (e) => {
     {
       type: 'LOOKUP_WORD',
       word,
-      sentence
+      sentence,
+      targetLang: lookupTargetLang
     },
     (result: WordLookupResult) => {
       if (chrome.runtime.lastError || !result) {
