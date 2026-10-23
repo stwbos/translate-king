@@ -29,6 +29,11 @@
     "test": "vitest run",
     "test:watch": "vitest"
   },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  },
   "devDependencies": {
     "@types/chrome": "^0.0.280",
     "@types/jsdom": "^30.0.0",
