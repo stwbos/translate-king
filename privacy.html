@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>翻译王 (TranslateKing) 隐私政策 · Privacy Policy</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; line-height: 1.6; max-width: 820px; margin: 40px auto; padding: 0 20px; color: #1f2937; }
+    h1 { color: #1e40af; border-bottom: 2px solid #e5e7eb; padding-bottom: 12px; }
+    h2 { color: #2563eb; margin-top: 28px; }
+    p, li { color: #374151; }
+    .lang-section { margin-bottom: 40px; }
+    .badge { display: inline-block; background: #dbeafe; color: #1e40af; padding: 4px 10px; border-radius: 9999px; font-size: 13px; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="lang-section">
+    <span class="badge">中文版</span>
+    <h1>翻译王 (TranslateKing) 隐私政策</h1>
+    <p>更新日期：2026年10月22日</p>
+    <p>翻译王（TranslateKing）致力于保护用户的个人隐私安全。本扩展程序严格遵守“最小必要权限原则”及 Google Chrome Web Store 开发者计划政策。</p>
+    
+    <h2>1. 数据收集与使用</h2>
+    <ul>
+      <li><strong>零个人隐私追踪</strong>：翻译王不收集、不存储、不上传您的姓名、电子邮件、浏览历史、密码或任何个人身份信息（PII）。</li>
+      <li><strong>本地配置保存</strong>：您的个性化偏好（如目标语言、界面主题、自定义快捷键等）仅存储在浏览器本地的 <code>chrome.storage</code> 中，绝不上传至任何集中式商业服务器。</li>
+      <li><strong>翻译请求直连</strong>：当您触发翻译时，待翻译的网页文本仅直接发送至您所选定的翻译服务商（如 Google Translate、微软翻译，或您自行配置的大模型 API 接口如 DeepSeek、OpenAI）。翻译王不设立中间服务器截留您的翻译内容。</li>
+    </ul>
+
+    <h2>2. 权限使用说明</h2>
+    <ul>
+      <li><code>&lt;all_urls&gt;</code>：仅用于在用户访问的外文网页中提取待翻译正文，并在段落下方向 DOM 注入双语对照译文及视频字幕。</li>
+      <li><code>storage</code> / <code>unlimitedStorage</code>：用于在本地保存用户的翻译偏好配置、离线词典缓存及生词本数据。</li>
+      <li><code>offscreen</code>：用于在独立的沙箱环境中运行本地语音合成（TTS）发音及文档解析，确保主浏览页面流畅不卡顿。</li>
+      <li><code>declarativeNetRequestWithHostAccess</code>：仅在用户启用特定翻译源时，适配翻译请求头以确保跨域翻译请求畅通。</li>
+    </ul>
+
+    <h2>3. 开源与合规</h2>
+    <p>翻译王遵循 GNU GPL-3.0 协议开源，代码透明可查。开源代码仓库位于：<a href="https://github.com/stwbos/translate-king" target="_blank">https://github.com/stwbos/translate-king</a>。</p>
+  </div>
+
+  <hr style="border: 0; border-top: 1px solid #e5e7eb; margin: 40px 0;">
+
+  <div class="lang-section">
+    <span class="badge">English Version</span>
+    <h1>TranslateKing Privacy Policy</h1>
+    <p>Last updated: October 22, 2026</p>
+    <p>TranslateKing is committed to protecting your privacy. This browser extension strictly adheres to the principle of data minimization and the Google Chrome Web Store Developer Program Policies.</p>
+    
+    <h2>1. Data Collection and Usage</h2>
+    <ul>
+      <li><strong>No Personal Tracking</strong>: TranslateKing does not collect, store, or transmit your name, email address, browsing history, passwords, or any personally identifiable information (PII).</li>
+      <li><strong>Local Storage Only</strong>: Your preferences (target languages, themes, shortcut keys, vocabulary cards) are stored locally using <code>chrome.storage</code> and are never transmitted to any centralized commercial servers.</li>
+      <li><strong>Direct Provider Transmission</strong>: When you request translation, only the selected webpage text is transmitted directly to your chosen provider (e.g., Google Translate, Microsoft Translator, or your configured API endpoints such as DeepSeek or OpenAI). TranslateKing does not operate intermediary servers to log or retain your content.</li>
+    </ul>
+
+    <h2>2. Permissions Justification</h2>
+    <ul>
+      <li><code>&lt;all_urls&gt;</code>: Required exclusively to detect foreign language text on user-visited webpages and inject inline bilingual translations and video subtitles into the DOM.</li>
+      <li><code>storage</code> & <code>unlimitedStorage</code>: Used to store user settings, cached translations, and vocabulary records locally on your device.</li>
+      <li><code>offscreen</code>: Used to manage speech synthesis (TTS) playback and document layout analysis in an isolated sandbox without degrading page performance.</li>
+      <li><code>declarativeNetRequestWithHostAccess</code>: Modifies network request headers strictly when necessary to route user-directed translation requests to chosen service APIs.</li>
+    </ul>
+
+    <h2>3. Open Source & Transparency</h2>
+    <p>TranslateKing is open source under GNU GPL-3.0. The full source code is publicly inspectable at: <a href="https://github.com/stwbos/translate-king" target="_blank">https://github.com/stwbos/translate-king</a>.</p>
+  </div>
+</body>
+</html>

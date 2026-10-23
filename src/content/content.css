@@ -1,0 +1,89 @@
+/**
+ * 翻译王 (TranslateKing) - 网页内嵌双语排版样式规范
+ */
+
+.translate-king-wrapper {
+  display: block !important;
+  margin-top: 6px !important;
+  margin-bottom: 4px !important;
+  line-height: 1.6 !important;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", Roboto, "Helvetica Neue", sans-serif !important;
+  user-select: text !important;
+  pointer-events: auto !important;
+}
+
+.translate-king-wrapper .translate-king-text {
+  display: inline-block !important;
+  font-size: 0.95em !important;
+  color: #2563eb !important; /* 经典皇家蓝译文，高雅清晰 */
+  letter-spacing: 0.02em !important;
+  background: rgba(37, 99, 235, 0.05) !important;
+  padding: 3px 8px !important;
+  border-radius: 4px !important;
+  border-left: 3px solid #3b82f6 !important;
+  word-break: break-word !important;
+}
+
+/* 社交平台（X / Twitter / Bluesky / Reddit）专属深度排版适配 */
+[data-testid="tweetText"] {
+  -webkit-line-clamp: unset !important;
+  overflow: visible !important;
+}
+
+[data-testid="tweetText"] .translate-king-wrapper {
+  margin-top: 8px !important;
+  margin-bottom: 2px !important;
+  display: block !important;
+}
+
+/* 暗黑模式自适应（系统偏好 或 网页暗黑属性） */
+@media (prefers-color-scheme: dark) {
+  .translate-king-wrapper .translate-king-text {
+    color: #93c5fd !important;
+    background: rgba(147, 197, 253, 0.1) !important;
+    border-left-color: #60a5fa !important;
+  }
+}
+
+/* Twitter / 暗色背景网站特定适配 */
+html[style*="color-scheme: dark"] .translate-king-wrapper .translate-king-text,
+html.dark .translate-king-wrapper .translate-king-text,
+body.dark-mode .translate-king-wrapper .translate-king-text {
+  color: #93c5fd !important;
+  background: rgba(147, 197, 253, 0.1) !important;
+  border-left-color: #60a5fa !important;
+}
+
+/* 纯中文直接替换模式：仅在刚发包时极微弱过渡（仅单次 0.5s，绝不 infinite 无限闪烁，完成后彻底静止） */
+.translate-king-replacing-pulse {
+  animation: tk-replace-pulse 0.5s ease-in-out 1 !important;
+}
+
+@keyframes tk-replace-pulse {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.65;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+/* 翻译中微动效 */
+.translate-king-pulse {
+  animation: tk-pulse 1.4s ease-in-out infinite;
+  color: #94a3b8 !important;
+  border-left-color: #cbd5e1 !important;
+  font-size: 0.85em !important;
+}
+
+@keyframes tk-pulse {
+  0%, 100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 0.95;
+  }
+}
