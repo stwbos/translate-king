@@ -85,7 +85,7 @@ function reconstructFragmentFromPlaceholders(
       clonedEl.removeAttribute('data-tk-replaced');
 
       const nestedAnchor = clonedEl.querySelector('a');
-      if (nestedAnchor) {
+      if (nestedAnchor && (clonedEl.tagName === 'A' || clonedEl.textContent?.trim() === nestedAnchor.textContent?.trim())) {
         nestedAnchor.textContent = innerText;
       } else {
         clonedEl.textContent = innerText;
@@ -198,8 +198,23 @@ export function injectTranslation(
         el.setAttribute('data-tk-orig-html', el.innerHTML);
       }
       const fragment = reconstructFragmentFromPlaceholders(translatedText, block.inlineElements, doc);
+
+      // 智能保留原段落的外层统一样式容器 (例如段落全部文字被 <strong> 或 <b> 包裹时，保留加粗外壳)
+      const firstChildEl = el.firstElementChild as HTMLElement | null;
+      const isFullWrapper =
+        firstChildEl &&
+        ['STRONG', 'B', 'EM', 'I'].includes(firstChildEl.tagName) &&
+        firstChildEl.textContent?.trim() === el.textContent?.trim();
+
       el.innerHTML = '';
-      el.appendChild(fragment);
+      if (isFullWrapper) {
+        const wrapperTag = firstChildEl.cloneNode(false) as HTMLElement;
+        wrapperTag.appendChild(fragment);
+        el.appendChild(wrapperTag);
+      } else {
+        el.appendChild(fragment);
+      }
+
       el.setAttribute('data-tk-replaced', 'true');
       return;
     }

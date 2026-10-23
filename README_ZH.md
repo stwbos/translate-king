@@ -10,7 +10,7 @@
 [![Manifest V3](https://img.shields.io/badge/Manifest-MV3-blue?logo=google-chrome&logoColor=white)](https://developer.chrome.com/docs/extensions/mv3/intro/)
 [![License GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-green.svg)](LICENSE)
 [![Bundle Size](https://img.shields.io/badge/Bundle%20Size-37%20KB-success)](#-极致轻量与性能)
-[![Tests Passed](https://img.shields.io/badge/Tests-40%2F40%20Passed-brightgreen)](tests/)
+[![Tests Passed](https://img.shields.io/badge/Tests-42%2F42%20Passed-brightgreen)](tests/)
 [![Vite 5](https://img.shields.io/badge/Built%20With-Vite%205-purple?logo=vite&logoColor=white)](https://vitejs.dev/)
 [![TypeScript 5](https://img.shields.io/badge/Language-TypeScript%205-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 
@@ -104,7 +104,8 @@ flowchart TD
 | [`tests/dictionary.test.ts`](tests/dictionary.test.ts) | 离线/在线英汉音标释义与内存高速缓存 | 2 | ✅ 通过 |
 | [`tests/sentenceExtractor.test.ts`](tests/sentenceExtractor.test.ts) | 复杂学术/长难句分句边界探测 | 4 | ✅ 通过 |
 | [`tests/toc_batch.test.ts`](tests/toc_batch.test.ts) | 复杂侧边目录批量并发转换与回写保护 | 1 | ✅ 通过 |
-| **总计** | **11 个测试套件** | **40 / 40** | **100% 成功** |
+| [`tests/zhihu_richtext.test.ts`](tests/zhihu_richtext.test.ts) | 知乎富文本加粗段落与内嵌搜索词超链接穿透替换 | 2 | ✅ 通过 |
+| **总计** | **12 个测试套件** | **42 / 42** | **100% 成功** |
 
 运行测试指令：
 ```bash

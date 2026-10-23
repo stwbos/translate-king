@@ -26,7 +26,13 @@ export function findTopLevelInlineElements(root: HTMLElement): HTMLElement[] {
     for (let child = node.firstChild; child; child = child.nextSibling) {
       if (child.nodeType === 1) { // Node.ELEMENT_NODE
         const el = child as HTMLElement;
-        if (INLINE_TAGS.has(el.tagName)) {
+        // 如果该内联标签包裹了整个容器的全部文本（如整段被 <strong> 加粗），
+        // 或者自身内部包含了子 <a> 链接且含有其他混合正文，则不能作为单一占位符，应深入遍历其内部真实子内联项
+        const isEntireWrapper = el.textContent?.trim() === root.textContent?.trim();
+        const nestedAnchor = el.querySelector('a');
+        const hasMixedAnchor = el.tagName !== 'A' && nestedAnchor !== null && el.textContent?.trim() !== nestedAnchor.textContent?.trim();
+
+        if (INLINE_TAGS.has(el.tagName) && !isEntireWrapper && !hasMixedAnchor) {
           results.push(el);
         } else {
           traverse(el);

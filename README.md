@@ -10,7 +10,7 @@
 [![Manifest V3](https://img.shields.io/badge/Manifest-MV3-blue?logo=google-chrome&logoColor=white)](https://developer.chrome.com/docs/extensions/mv3/intro/)
 [![License GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-green.svg)](LICENSE)
 [![Bundle Size](https://img.shields.io/badge/Bundle%20Size-37%20KB-success)](#-ultra-lightweight--performance)
-[![Tests Passed](https://img.shields.io/badge/Tests-40%2F40%20Passed-brightgreen)](tests/)
+[![Tests Passed](https://img.shields.io/badge/Tests-42%2F42%20Passed-brightgreen)](tests/)
 [![Vite 5](https://img.shields.io/badge/Built%20With-Vite%205-purple?logo=vite&logoColor=white)](https://vitejs.dev/)
 [![TypeScript 5](https://img.shields.io/badge/Language-TypeScript%205-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 
@@ -102,7 +102,8 @@ flowchart TD
 | [`tests/dictionary.test.ts`](tests/dictionary.test.ts) | Phonetics, definition lookups, and memory caching | 2 | ✅ Passed |
 | [`tests/sentenceExtractor.test.ts`](tests/sentenceExtractor.test.ts) | Complex academic sentence boundary segmentation | 4 | ✅ Passed |
 | [`tests/toc_batch.test.ts`](tests/toc_batch.test.ts) | Concurrent sidebar TOC item extraction and injection | 1 | ✅ Passed |
-| **Total** | **11 Test Suites** | **40 / 40** | **100% Passed** |
+| [`tests/zhihu_richtext.test.ts`](tests/zhihu_richtext.test.ts) | Zhihu rich text formatting, nested links inside bold paragraphs, replace mode | 2 | ✅ Passed |
+| **Total** | **12 Test Suites** | **42 / 42** | **100% Passed** |
 
 Run tests locally:
 ```bash
