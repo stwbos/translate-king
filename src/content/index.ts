@@ -28,6 +28,7 @@ function isExtensionValid(): boolean {
 
 let isPageTranslated = false;
 let isTranslating = false;
+let routeChangeQueued = false;
 let activeTargetLang: TargetLanguage = 'zh-CN';
 let activeTranslationMode: TranslationMode = 'bilingual';
 let enableSelection = true;
@@ -193,6 +194,12 @@ function startDynamicObserver(): void {
   mutationObserver = new MutationObserver((mutations) => {
     if (!isPageTranslated) return;
 
+    // 核心探测：即时感知 X / Twitter 等 SPA 框架由主世界发起的无刷新页面跳转
+    if (typeof window !== 'undefined' && window.location.href !== lastLocationHref) {
+      handleSpaRouteChange();
+      return;
+    }
+
     let hasAddedNodes = false;
     for (const m of mutations) {
       if (m.addedNodes.length > 0) {
@@ -280,7 +287,10 @@ async function translateFullPage(
   targetLang: TargetLanguage = activeTargetLang,
   mode: TranslationMode = activeTranslationMode
 ): Promise<void> {
-  if (isTranslating) return;
+  if (isTranslating) {
+    routeChangeQueued = true;
+    return;
+  }
   isTranslating = true;
   try {
     if (targetLang !== activeTargetLang || mode !== activeTranslationMode) {
@@ -346,6 +356,14 @@ async function translateFullPage(
     console.error('[TranslateKing] 全页翻译异常:', err);
   } finally {
     isTranslating = false;
+    if (routeChangeQueued) {
+      routeChangeQueued = false;
+      setTimeout(() => {
+        if (isPageTranslated && isExtensionValid()) {
+          translateFullPage(activeTargetLang, activeTranslationMode);
+        }
+      }, 50);
+    }
   }
 }
 
@@ -392,15 +410,69 @@ window.addEventListener('message', (e) => {
 });
 
 // -----------------------------------------------------------------
-// 监听 SPA 前端路由切换 (popstate & 劫持 pushState)
+// 监听 SPA 前端路由切换 (popstate + pushState/replaceState 劫持 + URL 轮询比对)
+// 彻底解决 X / Twitter 从聊天 (/messages) 切回探索 (/explore) 侧栏失效的问题
 // -----------------------------------------------------------------
-window.addEventListener('popstate', () => {
-  if (isPageTranslated) {
-    setTimeout(() => {
-      translateFullPage(activeTargetLang);
-    }, 300);
+let lastLocationHref = typeof window !== 'undefined' ? window.location.href : '';
+
+function handleSpaRouteChange(): void {
+  if (typeof window === 'undefined') return;
+  const currentHref = window.location.href;
+  if (currentHref === lastLocationHref) return;
+
+  const prevUrl = lastLocationHref;
+  lastLocationHref = currentHref;
+
+  if (!isPageTranslated || !isExtensionValid()) return;
+
+  console.log(`[TranslateKing] SPA 路由切换 (${prevUrl} -> ${currentHref})，立即触发新视图全量自愈翻译`);
+
+  // 第一波：120ms 快速扫描已经就绪的新路由骨架与侧边栏 DOM
+  setTimeout(() => {
+    if (isPageTranslated && isExtensionValid()) {
+      translateFullPage(activeTargetLang, activeTranslationMode);
+    }
+  }, 120);
+
+  // 第二波：450ms 兜底扫描异步渲染完成的列表、信息流与复杂组件
+  setTimeout(() => {
+    if (isPageTranslated && isExtensionValid()) {
+      translateFullPage(activeTargetLang, activeTranslationMode);
+    }
+  }, 450);
+}
+
+// 1. 监听浏览器前进后退与 Hash 变动
+window.addEventListener('popstate', handleSpaRouteChange);
+window.addEventListener('hashchange', handleSpaRouteChange);
+
+// 2. 劫持 History API (针对同上下文脚本触发的 pushState/replaceState)
+if (typeof history !== 'undefined') {
+  const rawPushState = history.pushState;
+  if (typeof rawPushState === 'function') {
+    history.pushState = function (...args) {
+      const res = rawPushState.apply(this, args);
+      handleSpaRouteChange();
+      return res;
+    };
   }
-});
+
+  const rawReplaceState = history.replaceState;
+  if (typeof rawReplaceState === 'function') {
+    history.replaceState = function (...args) {
+      const res = rawReplaceState.apply(this, args);
+      handleSpaRouteChange();
+      return res;
+    };
+  }
+}
+
+// 3. 500ms 定时心跳轮询保底，双重保障任何复杂前端路由跳转 100% 捕获
+setInterval(() => {
+  if (typeof window !== 'undefined' && window.location.href !== lastLocationHref) {
+    handleSpaRouteChange();
+  }
+}, 500);
 
 // -----------------------------------------------------------------
 // 鼠标划词悬浮释义与语境捕获逻辑 (支持中英双向智能互译)

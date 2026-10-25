@@ -5,7 +5,7 @@
  * 涵盖推文、文章、用户简介、人名音译、操作按钮、趋势话题、导航选项及标签页。
  */
 
-import { shouldIgnoreElement, isValidTranslatableText } from './filter';
+import { shouldIgnoreElement, isValidTranslatableText, isElementEffectivelyTranslated } from './filter';
 
 export interface TranslatableBlock {
   id: string;
@@ -90,8 +90,13 @@ export const ATOMIC_BLOCK_SELECTORS = [
   '[data-testid$="-follow"]',
   '[data-testid$="-unfollow"]',
   '[data-testid="SideNav_NewTweet_Button"]',
+  '[data-testid="SideNav_AccountSwitcher_Button"]',
   '[data-testid="tweetButtonInline"]',
   '[data-testid="tweetButton"]',
+  'header[role="banner"] nav a',
+  'header[role="banner"] [role="button"]',
+  'nav[aria-label="Primary"] a',
+  'nav[aria-label="Primary"] [role="button"]',
   'a.button',
   'a.btn',
   '.vector-toc-text > span:not(.vector-toc-numb)',
@@ -139,14 +144,13 @@ export function extractTranslatableBlocks(root: ParentNode = document): Translat
 
   for (const el of candidateLeafs) {
     if (processedElements.has(el)) continue;
-    if (el.hasAttribute('data-tk-id')) continue;
-    if (el.hasAttribute('data-tk-replaced')) continue;
+    if (isElementEffectivelyTranslated(el)) continue;
     if (shouldIgnoreElement(el)) continue;
 
     // 若 el 内部包含其他块级容器或已标记/翻译的子块，则说明它是外层布局容器，绝不能整体提取
     if (
       typeof el.querySelector === 'function' &&
-      (el.querySelector(CHILD_BLOCK_SELECTOR) || el.querySelector('[data-tk-id], [data-tk-replaced]'))
+      (el.querySelector(CHILD_BLOCK_SELECTOR) || el.querySelector('.translate-king-wrapper, [data-tk-replaced]'))
     ) {
       continue;
     }
@@ -157,7 +161,7 @@ export function extractTranslatableBlocks(root: ParentNode = document): Translat
       el.parentElement &&
       typeof el.parentElement.querySelector === 'function' &&
       !el.parentElement.querySelector(CHILD_BLOCK_SELECTOR) &&
-      !el.parentElement.querySelector('[data-tk-id], [data-tk-replaced]')
+      !el.parentElement.querySelector('.translate-king-wrapper, [data-tk-replaced]')
     ) {
       continue;
     }
@@ -177,8 +181,7 @@ function processElement(
   processedElements: Set<HTMLElement>
 ): void {
   if (processedElements.has(el)) return;
-  if (el.hasAttribute('data-tk-id')) return;
-  if (el.hasAttribute('data-tk-replaced')) return;
+  if (isElementEffectivelyTranslated(el)) return;
   if (shouldIgnoreElement(el)) return;
 
   // 检查元素是否在文档树中有效（过滤 display: none 的不可见元素）

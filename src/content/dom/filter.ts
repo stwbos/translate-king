@@ -42,6 +42,53 @@ const NOISE_SELECTORS = [
 ].join(',');
 
 /**
+ * 校验元素是否真正处于翻译生效状态。
+ * 若 React / Vue 等 SPA 框架在前端路由切换或组件重挂载时重置了子节点内容
+ * （表现为译文 wrapper 丢失、或 textContent 还原为 data-tk-orig-text），
+ * 则自动清除过期脏标记，允许自愈式重新提取与翻译。
+ */
+export function isElementEffectivelyTranslated(el: Element): boolean {
+  // 1. 如果自身是翻译容器，或包含有效的双语译文容器，视为有效翻译
+  if (
+    el.classList?.contains('translate-king-wrapper') ||
+    (typeof el.querySelector === 'function' && el.querySelector('.translate-king-wrapper'))
+  ) {
+    return true;
+  }
+
+  // 2. 如果存在直接替换标记，检查其内容是否依然维持译文状态
+  if (typeof el.hasAttribute === 'function' && el.hasAttribute('data-tk-replaced')) {
+    const origText = el.getAttribute('data-tk-orig-text')?.trim();
+    const transText = el.getAttribute('data-tk-trans-text')?.trim();
+    const currentText = el.textContent?.trim();
+
+    // 判定情况 A：若当前文本变回了原文，说明已被 React 重新挂载为纯净英文！
+    // 判定情况 B：当前文本为空（如 Twitter 侧栏在聊天页切换为纯图标模式，文本被拔除）
+    // 判定情况 C：有 transText 但当前文本完全不包含已翻译词汇
+    const isStillTranslated =
+      transText && currentText ? currentText === transText || currentText.includes(transText) : false;
+
+    if (!isStillTranslated || !currentText || (origText && currentText === origText)) {
+      el.removeAttribute('data-tk-replaced');
+      el.removeAttribute('data-tk-id');
+      el.removeAttribute('data-tk-orig-text');
+      el.removeAttribute('data-tk-trans-text');
+      el.removeAttribute('data-tk-orig-html');
+      return false;
+    }
+    return true;
+  }
+
+  // 3. 仅有 data-tk-id 标记但既无 wrapper 容器也无替换状态，说明是 React 重渲染后残留的孤儿属性
+  if (typeof el.hasAttribute === 'function' && el.hasAttribute('data-tk-id')) {
+    el.removeAttribute('data-tk-id');
+    return false;
+  }
+
+  return false;
+}
+
+/**
  * 判断指定元素是否应该被忽略（代码、脚本、输入框、或明确声明不翻译的节点）
  */
 export function shouldIgnoreElement(element: Element): boolean {
@@ -61,15 +108,34 @@ export function shouldIgnoreElement(element: Element): boolean {
     return true;
   }
 
-  // 忽略已有翻译容器、已直接替换节点、或包含已翻译子块的外层容器，彻底杜绝已替换后二次重复提取与覆盖掏空
+  // 忽略已有翻译容器
   if (
     element.classList?.contains('translate-king-wrapper') ||
-    (typeof element.closest === 'function' && element.closest('.translate-king-wrapper')) ||
-    (typeof element.hasAttribute === 'function' && element.hasAttribute('data-tk-replaced')) ||
-    (typeof element.closest === 'function' && element.closest('[data-tk-replaced]')) ||
-    (typeof element.querySelector === 'function' && element.querySelector('[data-tk-id], [data-tk-replaced]'))
+    (typeof element.closest === 'function' && element.closest('.translate-king-wrapper'))
   ) {
     return true;
+  }
+
+  // 检查自身或最近祖先是否处于有效替换生效状态 (支持 SPA 框架重刷后自愈)
+  if (typeof element.closest === 'function') {
+    const replacedAncestor = element.closest('[data-tk-replaced]');
+    if (replacedAncestor && isElementEffectivelyTranslated(replacedAncestor)) {
+      return true;
+    }
+  }
+
+  if (typeof element.hasAttribute === 'function' && element.hasAttribute('data-tk-replaced')) {
+    if (isElementEffectivelyTranslated(element)) {
+      return true;
+    }
+  }
+
+  // 若自身包含尚未过期的有效翻译子块，则外层容器不作为叶子重复提取
+  if (typeof element.querySelector === 'function') {
+    const childTranslated = element.querySelector('.translate-king-wrapper, [data-tk-replaced]');
+    if (childTranslated && isElementEffectivelyTranslated(childTranslated)) {
+      return true;
+    }
   }
 
   // 遵循 W3C 规范：translate="no" 或 class="notranslate"

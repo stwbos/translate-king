@@ -104,6 +104,11 @@ export function removeTranslation(element: HTMLElement): void {
     }
     element.removeAttribute('data-tk-orig-text');
   }
+  element.removeAttribute('data-tk-trans-text');
+  if (element.hasAttribute('data-tk-orig-aria')) {
+    element.setAttribute('aria-label', element.getAttribute('data-tk-orig-aria') || '');
+    element.removeAttribute('data-tk-orig-aria');
+  }
   element.removeAttribute('data-tk-replaced');
 }
 
@@ -269,6 +274,7 @@ export function injectTranslation(
         el.appendChild(fragment);
       }
 
+      el.setAttribute('data-tk-trans-text', translatedText.replace(/<\/?x\d+[^>]*>/gi, ''));
       el.setAttribute('data-tk-replaced', 'true');
       return;
     }
@@ -299,6 +305,19 @@ export function injectTranslation(
         el.setAttribute('data-tk-orig-text', block.originalText);
       }
       el.textContent = translatedText;
+    }
+
+    el.setAttribute('data-tk-trans-text', translatedText);
+
+    // 同步翻译 aria-label（适配 Twitter 紧凑模式图标提示）
+    if (el.hasAttribute('aria-label')) {
+      const origAria = el.getAttribute('aria-label') || '';
+      if (origAria.trim() === block.originalText.trim()) {
+        if (!el.hasAttribute('data-tk-orig-aria')) {
+          el.setAttribute('data-tk-orig-aria', origAria);
+        }
+        el.setAttribute('aria-label', translatedText);
+      }
     }
 
     el.setAttribute('data-tk-replaced', 'true');
