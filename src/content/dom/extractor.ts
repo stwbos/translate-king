@@ -67,6 +67,18 @@ export const ATOMIC_BLOCK_SELECTORS = [
   '[data-testid="UserCell"] [data-testid$="-follow"]',
   '[data-testid="UserCell"] [data-testid$="-unfollow"]',
 
+  // 3. X / Twitter 私信与聊天消息 (Direct Messages & Conversations) 核心高精度提取
+  '[data-testid="messageEntry"] [dir="auto"]',
+  '[data-testid="messageEntry"] [dir="ltr"]',
+  '[data-testid="messageEntry"] [data-testid="tweetText"]',
+  '[data-testid="message-entry"] [dir="auto"]',
+  '[data-testid="conversation"] [dir="auto"]',
+  '[data-testid="conversation"] [dir="ltr"]',
+  'div[aria-label="Timeline: Messages"] div[dir="auto"]',
+  '[data-testid="DMConversationBody"] div[dir="auto"]',
+  '[data-testid="DMDrawer"] div[dir="auto"]',
+  'section[aria-label="Direct Messages"] div[dir="auto"]',
+
   // 3. 标题与栏目名称 (如 "Who to follow", "Trends for you", "What's happening")
   '[role="heading"]',
   'h1',

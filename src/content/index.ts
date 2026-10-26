@@ -29,6 +29,7 @@ function isExtensionValid(): boolean {
 let isPageTranslated = false;
 let isTranslating = false;
 let routeChangeQueued = false;
+let currentSessionEpoch = 0;
 let activeTargetLang: TargetLanguage = 'zh-CN';
 let activeTranslationMode: TranslationMode = 'bilingual';
 let enableSelection = true;
@@ -105,6 +106,7 @@ function partitionByL0Cache(blocks: TranslatableBlock[]): {
 let mutationObserver: MutationObserver | null = null;
 let mutationDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 let isProcessingMutations = false;
+let hasPendingMutations = false;
 
 /**
  * 执行批次段落的发送与译文上屏挂载
@@ -185,8 +187,69 @@ async function translateAndMountBlocks(
 }
 
 /**
- * 启动动态内容观察器（应对 X/Twitter、Reddit 等单页无限滚动流）
- * 采用 50ms 超敏捷响应与 1200px 远距离超前预取视野，彻底杜绝“读到了才慢吞吞开始加载”
+ * 调度执行 DOM 增量变动翻译（防抖 + 队列防丢 + 视口优先）
+ */
+function processDynamicMutations(delay = 40): void {
+  if (mutationDebounceTimer) {
+    clearTimeout(mutationDebounceTimer);
+    mutationDebounceTimer = null;
+  }
+
+  mutationDebounceTimer = setTimeout(async () => {
+    if (!isPageTranslated || !isExtensionValid()) return;
+
+    if (isProcessingMutations) {
+      hasPendingMutations = true;
+      return;
+    }
+
+    isProcessingMutations = true;
+    try {
+      const newBlocks = extractTranslatableBlocks(document);
+      if (newBlocks.length > 0) {
+        // 1. 同步探测 L0 缓存：回收重挂载的推文/聊天记录 0ms 瞬间秒出，绝不闪烁 Loading
+        const { uncachedBlocks } = partitionByL0Cache(newBlocks);
+
+        if (uncachedBlocks.length > 0) {
+          // 2. 扩大探测范围至 1200px（超前预读视野）
+          const { visibleBlocks, offscreenBlocks } = partitionBlocksByViewport(uncachedBlocks, 1200);
+
+          // 当前视口及邻近区域（眼前或即将进入眼前的消息/推文）：优先极速发包上屏
+          if (visibleBlocks.length > 0) {
+            visibleBlocks.forEach((block) => injectLoadingState(block, activeTranslationMode));
+            await translateAndMountBlocks(visibleBlocks, activeTargetLang);
+          }
+
+          // 更远距离的屏外内容：后台静默全量预取
+          if (offscreenBlocks.length > 0) {
+            const CHUNK_SIZE = 30;
+            for (let i = 0; i < offscreenBlocks.length; i += CHUNK_SIZE) {
+              if (!isPageTranslated || !isExtensionValid()) break;
+              const chunk = offscreenBlocks.slice(i, i + CHUNK_SIZE);
+              await translateAndMountBlocks(chunk, activeTargetLang);
+            }
+          }
+        }
+      }
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      if (errMsg.includes('Extension context invalidated')) {
+        stopDynamicObserver();
+        return;
+      }
+      console.error('[TranslateKing] 动态增量预翻译异常:', err);
+    } finally {
+      isProcessingMutations = false;
+      if (hasPendingMutations) {
+        hasPendingMutations = false;
+        processDynamicMutations(20);
+      }
+    }
+  }, delay);
+}
+
+/**
+ * 启动动态内容观察器（应对 X/Twitter、Reddit、聊天私信等单页无限滚动流）
  */
 function startDynamicObserver(): void {
   if (mutationObserver || typeof MutationObserver === 'undefined') return;
@@ -209,49 +272,7 @@ function startDynamicObserver(): void {
     }
     if (!hasAddedNodes) return;
 
-    if (mutationDebounceTimer) clearTimeout(mutationDebounceTimer);
-    // 50ms 极速防抖：在用户滑动滚轮但还未看清的间隙，提前捕获并处理
-    mutationDebounceTimer = setTimeout(async () => {
-      if (!isPageTranslated || isProcessingMutations || !isExtensionValid()) return;
-      isProcessingMutations = true;
-      try {
-        const newBlocks = extractTranslatableBlocks(document);
-        if (newBlocks.length > 0) {
-          // 1. 同步探测 L0 缓存：回收重挂载的推文 0ms 瞬间秒出，绝不闪烁 Loading
-          const { uncachedBlocks } = partitionByL0Cache(newBlocks);
-
-          if (uncachedBlocks.length > 0) {
-            // 2. 扩大探测范围至 1200px（相当于超前预读 2~3 个屏幕）
-            const { visibleBlocks, offscreenBlocks } = partitionBlocksByViewport(uncachedBlocks, 1200);
-
-            // 当前视口及邻近区域（眼前或即将进入眼前的推文）：优先极速翻译上屏
-            if (visibleBlocks.length > 0) {
-              visibleBlocks.forEach((block) => injectLoadingState(block, activeTranslationMode));
-              await translateAndMountBlocks(visibleBlocks, activeTargetLang);
-            }
-
-            // 更远距离的屏外内容：后台静默全量预取，不显示 Loading 动画，滚动到时直接就绪
-            if (offscreenBlocks.length > 0) {
-              const CHUNK_SIZE = 30;
-              for (let i = 0; i < offscreenBlocks.length; i += CHUNK_SIZE) {
-                if (!isPageTranslated || !isExtensionValid()) break;
-                const chunk = offscreenBlocks.slice(i, i + CHUNK_SIZE);
-                await translateAndMountBlocks(chunk, activeTargetLang);
-              }
-            }
-          }
-        }
-      } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        if (errMsg.includes('Extension context invalidated')) {
-          stopDynamicObserver();
-          return;
-        }
-        console.error('[TranslateKing] 动态增量预翻译异常:', err);
-      } finally {
-        isProcessingMutations = false;
-      }
-    }, 50);
+    processDynamicMutations(40);
   });
 
   if (document.body) {
@@ -277,21 +298,27 @@ function stopDynamicObserver(): void {
 }
 
 /**
- * 视口优先 + 激进全量预读双语翻译引擎 (Aggressive Speculative Pre-translation)
+ * 视口优先 + 纪元抢占 + 异步屏外静默全量预读双语翻译引擎 (Epoch-based Preemptive Translation Engine)
  * 核心机制：
- * 1. 优先发包眼前所见段落 (150ms 闪电上屏，保证交互零等待)
- * 2. 紧随其后并发推进屏外所有段落全量预译，在用户阅读首屏的几百毫秒内整页全部静默就绪！
- * 3. 屏外段落绝不显示 Loading 动效，用户向下滚动时看到的永远是已完成的译文！
+ * 1. 纪元抢占机制 (Epoch Preemption)：当用户在 SPA 切换页面或点击聊天会话时，旧页面的异步屏外发包立即退避中止，
+ *    释放执行权与网络连接，新页面的可见正文 0ms 瞬间抢占直出！
+ * 2. 眼前段落优先发包 (100~200ms 闪电上屏，保证交互零等待)
+ * 3. 屏外段落完全解耦并发预读，绝不阻塞后续页面的翻译响应！
  */
 async function translateFullPage(
   targetLang: TargetLanguage = activeTargetLang,
-  mode: TranslationMode = activeTranslationMode
+  mode: TranslationMode = activeTranslationMode,
+  forcePreempt = false
 ): Promise<void> {
-  if (isTranslating) {
+  if (isTranslating && !forcePreempt) {
     routeChangeQueued = true;
     return;
   }
+
+  const sessionEpoch = ++currentSessionEpoch;
   isTranslating = true;
+  routeChangeQueued = false;
+
   try {
     if (targetLang !== activeTargetLang || mode !== activeTranslationMode) {
       localTranslationCache.clear();
@@ -304,6 +331,7 @@ async function translateFullPage(
       console.log('[TranslateKing] 当前页面未检测到有效待翻译文本，已挂载动态监听');
       isPageTranslated = true;
       startDynamicObserver();
+      isTranslating = false;
       return;
     }
 
@@ -313,40 +341,37 @@ async function translateFullPage(
     // 2. 智能划分两级优先级队列：视口当前可见 vs 屏外待见段落 (预读缓冲设为 400px)
     const { visibleBlocks, offscreenBlocks } = partitionBlocksByViewport(uncachedBlocks, 400);
 
-    console.log(`[TranslateKing] 启动激进预翻译 (模式: ${mode})：首屏高优 ${visibleBlocks.length} 段，全量并发预读 ${offscreenBlocks.length} 段`);
+    console.log(`[TranslateKing] 启动抢占式预翻译 (纪元: ${sessionEpoch}, 模式: ${mode})：首屏高优 ${visibleBlocks.length} 段，全量并发预读 ${offscreenBlocks.length} 段`);
 
-    // 3. 立即激活动态流监听器，确保新推文在滚动中随时被敏捷捕捉
+    // 3. 立即激活动态流监听器，确保新推文与聊天消息在滚动中随时被敏捷捕捉
     isPageTranslated = true;
     startDynamicObserver();
 
     // 4. 第一优先级【超速首屏直出】：视口内可见段落注入加载态，并立即发出网络请求
-    const visiblePromise = (async () => {
-      if (visibleBlocks.length > 0) {
-        visibleBlocks.forEach((block) => injectLoadingState(block, activeTranslationMode));
-        await translateAndMountBlocks(visibleBlocks, activeTargetLang);
-      }
-    })();
+    if (visibleBlocks.length > 0) {
+      if (currentSessionEpoch !== sessionEpoch) return;
+      visibleBlocks.forEach((block) => injectLoadingState(block, activeTranslationMode));
+      await translateAndMountBlocks(visibleBlocks, activeTargetLang);
+    }
 
-    // 5. 第二优先级【激进并发预翻译】：紧跟首屏包之后全速并发启动，绝不等待用户滑动！
-    const offscreenPromise = (async () => {
-      if (offscreenBlocks.length === 0) return;
-      // 微任务让步 25ms，保证首屏包优先抢占网络套接字发包
-      await new Promise((resolve) => setTimeout(resolve, 25));
+    // 首屏可见内容一旦挂载上屏，立即解脱 isTranslating 主锁，允许 SPA 路由与点击 0ms 抢占！
+    isTranslating = false;
 
-      // 采用大批次 (CHUNK_SIZE = 40) 全力吞吐，屏外段落静默挂载，绝对不展示 Loading 动画
-      const CHUNK_SIZE = 40;
-      for (let i = 0; i < offscreenBlocks.length; i += CHUNK_SIZE) {
-        if (!isPageTranslated) break;
-        const chunk = offscreenBlocks.slice(i, i + CHUNK_SIZE);
-        await translateAndMountBlocks(chunk, activeTargetLang);
-        // 微小让步 10ms，保证 60fps 页面丝滑不卡顿
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      }
-    })();
-
-    // 并行调度双通道
-    await Promise.all([visiblePromise, offscreenPromise]);
-    console.log('[TranslateKing] 全文所有段落激进预翻译已全部就绪！向下滚动完全无感直接阅读！');
+    // 5. 第二优先级【激进并发预翻译】：解耦后台静默推进，若用户切页或发生新纪元则自动退出
+    if (offscreenBlocks.length > 0) {
+      (async () => {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        const CHUNK_SIZE = 40;
+        for (let i = 0; i < offscreenBlocks.length; i += CHUNK_SIZE) {
+          if (!isPageTranslated || currentSessionEpoch !== sessionEpoch || !isExtensionValid()) {
+            break;
+          }
+          const chunk = offscreenBlocks.slice(i, i + CHUNK_SIZE);
+          await translateAndMountBlocks(chunk, activeTargetLang);
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+      })();
+    }
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
     if (errMsg.includes('Extension context invalidated')) {
@@ -355,14 +380,16 @@ async function translateFullPage(
     }
     console.error('[TranslateKing] 全页翻译异常:', err);
   } finally {
-    isTranslating = false;
+    if (currentSessionEpoch === sessionEpoch) {
+      isTranslating = false;
+    }
     if (routeChangeQueued) {
       routeChangeQueued = false;
       setTimeout(() => {
         if (isPageTranslated && isExtensionValid()) {
-          translateFullPage(activeTargetLang, activeTranslationMode);
+          translateFullPage(activeTargetLang, activeTranslationMode, true);
         }
-      }, 50);
+      }, 30);
     }
   }
 }
@@ -371,11 +398,13 @@ async function translateFullPage(
  * 还原恢复纯净原文
  */
 function restoreOriginalPage(): void {
+  currentSessionEpoch++;
   stopDynamicObserver();
   clearAllTranslations(document);
   localTranslationCache.clear();
   isPageTranslated = false;
   isTranslating = false;
+  routeChangeQueued = false;
   console.log('[TranslateKing] 已恢复网页纯净原文');
 }
 
@@ -410,8 +439,8 @@ window.addEventListener('message', (e) => {
 });
 
 // -----------------------------------------------------------------
-// 监听 SPA 前端路由切换 (popstate + pushState/replaceState 劫持 + URL 轮询比对)
-// 彻底解决 X / Twitter 从聊天 (/messages) 切回探索 (/explore) 侧栏失效的问题
+// 监听 SPA 前端路由切换 (点击预拦截 + popstate + pushState 劫持 + 高频 URL 心跳轮询)
+// 彻底解决 X / Twitter 切换到聊天页面 (/messages) 或在聊天会话间切换无法立即翻译的问题
 // -----------------------------------------------------------------
 let lastLocationHref = typeof window !== 'undefined' ? window.location.href : '';
 
@@ -425,28 +454,76 @@ function handleSpaRouteChange(): void {
 
   if (!isPageTranslated || !isExtensionValid()) return;
 
-  console.log(`[TranslateKing] SPA 路由切换 (${prevUrl} -> ${currentHref})，立即触发新视图全量自愈翻译`);
+  console.log(`[TranslateKing] SPA 路由切换 (${prevUrl} -> ${currentHref})，立即触发新视图抢占式翻译`);
 
-  // 第一波：120ms 快速扫描已经就绪的新路由骨架与侧边栏 DOM
-  setTimeout(() => {
-    if (isPageTranslated && isExtensionValid()) {
-      translateFullPage(activeTargetLang, activeTranslationMode);
-    }
-  }, 120);
+  // 第 0 波：0ms 立即执行抢占式翻译（打断前序页面的屏外请求，立即提取新路由初屏 DOM）
+  translateFullPage(activeTargetLang, activeTranslationMode, true);
 
-  // 第二波：450ms 兜底扫描异步渲染完成的列表、信息流与复杂组件
-  setTimeout(() => {
-    if (isPageTranslated && isExtensionValid()) {
-      translateFullPage(activeTargetLang, activeTranslationMode);
-    }
-  }, 450);
+  // 针对复杂单页（如 X 聊天 /messages、GraphQL 异步渲染列表），发起高频密集波段自愈探测
+  const waves = [40, 150, 350, 750, 1400];
+  waves.forEach((delay) => {
+    setTimeout(() => {
+      if (isPageTranslated && isExtensionValid()) {
+        const newBlocks = extractTranslatableBlocks(document);
+        if (newBlocks.length > 0) {
+          translateFullPage(activeTargetLang, activeTranslationMode, false);
+        }
+      }
+    }, delay);
+  });
 }
 
-// 1. 监听浏览器前进后退与 Hash 变动
+// 快速连续探测，应对用户点击触发的异步路由跳转
+function triggerFastSpaCheck(): void {
+  const delays = [0, 30, 80, 180, 350, 700];
+  delays.forEach((delay) => {
+    setTimeout(() => {
+      if (typeof window !== 'undefined' && window.location.href !== lastLocationHref) {
+        handleSpaRouteChange();
+      }
+    }, delay);
+  });
+}
+
+// 1. 捕获阶段点击监听：用户点击任何链接、导航或聊天条目瞬间启动抢先探测
+document.addEventListener(
+  'click',
+  (e) => {
+    if (!isPageTranslated || !isExtensionValid()) return;
+    const target = e.target as HTMLElement | null;
+    if (!target) return;
+
+    const navElement = target.closest(
+      'a, [role="link"], [role="tab"], [data-testid="conversation"], [data-testid="messageEntry"], [data-testid="AppTabBar_DirectMessage_Link"], [data-testid="SideNav_NewTweet_Button"]'
+    );
+    if (navElement) {
+      triggerFastSpaCheck();
+    }
+
+    // 针对私信聊天界面：若点击了具体的聊天会话项，启动聊天消息加载专属波段扫描
+    const isConversation = target.closest('[data-testid="conversation"]');
+    if (isConversation) {
+      const chatWaves = [60, 180, 400, 800, 1500];
+      chatWaves.forEach((w) => {
+        setTimeout(() => {
+          if (isPageTranslated && isExtensionValid()) {
+            const chatBlocks = extractTranslatableBlocks(document);
+            if (chatBlocks.length > 0) {
+              translateFullPage(activeTargetLang, activeTranslationMode, true);
+            }
+          }
+        }, w);
+      });
+    }
+  },
+  true
+);
+
+// 2. 监听浏览器前进后退与 Hash 变动
 window.addEventListener('popstate', handleSpaRouteChange);
 window.addEventListener('hashchange', handleSpaRouteChange);
 
-// 2. 劫持 History API (针对同上下文脚本触发的 pushState/replaceState)
+// 3. 劫持 History API (针对同上下文脚本触发的 pushState/replaceState)
 if (typeof history !== 'undefined') {
   const rawPushState = history.pushState;
   if (typeof rawPushState === 'function') {
@@ -467,12 +544,12 @@ if (typeof history !== 'undefined') {
   }
 }
 
-// 3. 500ms 定时心跳轮询保底，双重保障任何复杂前端路由跳转 100% 捕获
+// 4. 100ms 高频定时心跳轮询保底，双重保障任何复杂前端路由跳转 100% 毫秒级捕获
 setInterval(() => {
   if (typeof window !== 'undefined' && window.location.href !== lastLocationHref) {
     handleSpaRouteChange();
   }
-}, 500);
+}, 100);
 
 // -----------------------------------------------------------------
 // 鼠标划词悬浮释义与语境捕获逻辑 (支持中英双向智能互译)
