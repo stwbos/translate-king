@@ -68,16 +68,24 @@ export const ATOMIC_BLOCK_SELECTORS = [
   '[data-testid="UserCell"] [data-testid$="-unfollow"]',
 
   // 3. X / Twitter 私信与聊天消息 (Direct Messages & Conversations) 核心高精度提取
+  '[data-testid="messageEntry"] [data-testid="tweetText"]',
   '[data-testid="messageEntry"] [dir="auto"]',
   '[data-testid="messageEntry"] [dir="ltr"]',
-  '[data-testid="messageEntry"] [data-testid="tweetText"]',
+  '[data-testid="messageEntry"] [dir="rtl"]',
+  '[data-testid="messageEntry"] [data-testid="messageText"]',
+  '[data-testid="messageEntry"] [data-testid="message-bubble"]',
+  '[data-testid="messageEntry"] span[data-text="true"]',
   '[data-testid="message-entry"] [dir="auto"]',
+  '[data-testid="message-entry"] [dir="ltr"]',
   '[data-testid="conversation"] [dir="auto"]',
   '[data-testid="conversation"] [dir="ltr"]',
   'div[aria-label="Timeline: Messages"] div[dir="auto"]',
+  'div[aria-label*="Messages"] [data-testid="messageEntry"]',
+  'div[aria-label*="私信"] [data-testid="messageEntry"]',
   '[data-testid="DMConversationBody"] div[dir="auto"]',
   '[data-testid="DMDrawer"] div[dir="auto"]',
   'section[aria-label="Direct Messages"] div[dir="auto"]',
+  'section[aria-label*="私信"] div[dir="auto"]',
 
   // 3. 标题与栏目名称 (如 "Who to follow", "Trends for you", "What's happening")
   '[role="heading"]',
@@ -117,7 +125,7 @@ export const ATOMIC_BLOCK_SELECTORS = [
   '.reference-text a:not([href^="#cite_ref"])',
   'nav a:not(.vector-toc-link)',
   'a[role="tab"]'
-].join(',');
+];
 
 // 保留 BLOCK_SELECTORS 供向后兼容及测试用例使用
 export const BLOCK_SELECTORS = ATOMIC_BLOCK_SELECTORS;
@@ -137,11 +145,19 @@ export function extractTranslatableBlocks(root: ParentNode = document): Translat
 
   // ---------------------------------------------------------
   // 阶段 1：提取语义优先的原子块 (Tweets, 文章段落, 标题, 按钮)
+  // 分块合并查询（每块 6 个选择器），杜绝任何浏览器对单个 CSS 选择器字符串长度的限制（如 2048 字符溢出）
   // ---------------------------------------------------------
-  const atomicElements = Array.from(root.querySelectorAll<HTMLElement>(ATOMIC_BLOCK_SELECTORS));
-
-  for (const el of atomicElements) {
-    processElement(el, blocks, processedElements);
+  const CHUNK_SIZE = 6;
+  for (let i = 0; i < ATOMIC_BLOCK_SELECTORS.length; i += CHUNK_SIZE) {
+    const chunkSelector = ATOMIC_BLOCK_SELECTORS.slice(i, i + CHUNK_SIZE).join(',');
+    try {
+      const atomicElements = root.querySelectorAll<HTMLElement>(chunkSelector);
+      for (let j = 0; j < atomicElements.length; j++) {
+        processElement(atomicElements[j], blocks, processedElements);
+      }
+    } catch {
+      // 容错降级
+    }
   }
 
   // ---------------------------------------------------------

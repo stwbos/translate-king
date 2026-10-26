@@ -265,10 +265,22 @@ function startDynamicObserver(): void {
 
     let hasAddedNodes = false;
     for (const m of mutations) {
-      if (m.addedNodes.length > 0) {
-        hasAddedNodes = true;
-        break;
+      for (let i = 0; i < m.addedNodes.length; i++) {
+        const node = m.addedNodes[i];
+        if (node.nodeType === 1) {
+          const el = node as HTMLElement;
+          if (
+            el.classList?.contains('translate-king-wrapper') ||
+            el.id === 'translate-king-bubble-host' ||
+            el.id === 'translate-king-root'
+          ) {
+            continue;
+          }
+          hasAddedNodes = true;
+          break;
+        }
       }
+      if (hasAddedNodes) break;
     }
     if (!hasAddedNodes) return;
 
@@ -460,14 +472,11 @@ function handleSpaRouteChange(): void {
   translateFullPage(activeTargetLang, activeTranslationMode, true);
 
   // 针对复杂单页（如 X 聊天 /messages、GraphQL 异步渲染列表），发起高频密集波段自愈探测
-  const waves = [40, 150, 350, 750, 1400];
+  const waves = [50, 200, 500, 1000, 2000];
   waves.forEach((delay) => {
     setTimeout(() => {
       if (isPageTranslated && isExtensionValid()) {
-        const newBlocks = extractTranslatableBlocks(document);
-        if (newBlocks.length > 0) {
-          translateFullPage(activeTargetLang, activeTranslationMode, false);
-        }
+        processDynamicMutations(0);
       }
     }, delay);
   });
@@ -503,14 +512,11 @@ document.addEventListener(
     // 针对私信聊天界面：若点击了具体的聊天会话项，启动聊天消息加载专属波段扫描
     const isConversation = target.closest('[data-testid="conversation"]');
     if (isConversation) {
-      const chatWaves = [60, 180, 400, 800, 1500];
+      const chatWaves = [60, 200, 500, 1000, 2000];
       chatWaves.forEach((w) => {
         setTimeout(() => {
           if (isPageTranslated && isExtensionValid()) {
-            const chatBlocks = extractTranslatableBlocks(document);
-            if (chatBlocks.length > 0) {
-              translateFullPage(activeTargetLang, activeTranslationMode, true);
-            }
+            processDynamicMutations(0);
           }
         }, w);
       });
