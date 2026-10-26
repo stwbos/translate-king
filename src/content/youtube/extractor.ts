@@ -182,6 +182,39 @@ export function parseJson3EventsToCues(
 }
 
 /**
+ * 直接从 DOM 中的页面脚本 (document.scripts) 中同步提取 captionTracks
+ * 突破 Chrome MV3 沙箱限制与播放器初始化延迟，0 毫秒同步命中！
+ */
+export function extractCaptionTracksFromDom(doc: Document = document): YouTubeCaptionTrack[] | null {
+  if (!doc || !doc.scripts) return null;
+
+  for (let i = 0; i < doc.scripts.length; i++) {
+    const s = doc.scripts[i];
+    const text = s.textContent || '';
+    if (text.includes('"captionTracks":')) {
+      const match = text.match(/"captionTracks":\s*(\[.+?\])/);
+      if (match) {
+        try {
+          const cleaned = match[1].replace(/\\u0026/g, '&');
+          const tracks = JSON.parse(cleaned);
+          if (Array.isArray(tracks) && tracks.length > 0) {
+            return tracks;
+          }
+        } catch (_) {
+          try {
+            const tracks = JSON.parse(match[1]);
+            if (Array.isArray(tracks) && tracks.length > 0) {
+              return tracks;
+            }
+          } catch (_) {}
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/**
  * 从可用字幕轨道列表中挑出最优先的英文字幕
  * 优先级：
  * 1. 官方人工英文字幕 (kind !== 'asr' && en)

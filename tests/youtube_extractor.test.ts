@@ -5,7 +5,8 @@ import {
   mergeAsrSubtitles,
   parseHumanCcSubtitles,
   selectBestEnglishTrack,
-  normalizeTimedTextUrl
+  normalizeTimedTextUrl,
+  extractCaptionTracksFromDom
 } from '../src/content/youtube/extractor';
 import { YouTubeCaptionTrack, TimedTextJson3Event } from '../src/content/youtube/types';
 
@@ -140,5 +141,22 @@ describe('YouTube 字幕嗅探与 ASR 断句重组 (YouTube Extractor & Sentence
     // 第二句经过长时间停顿后独立成句
     expect(cues[1].originalText).toBe('Let us begin');
     expect(cues[1].startMs).toBe(5000);
+  });
+
+  it('能直接从 document.scripts 中毫秒级提取 captionTracks', () => {
+    const mockDoc = {
+      scripts: [
+        { textContent: 'console.log("nothing here");' },
+        {
+          textContent:
+            'var ytInitialPlayerResponse = {"captions":{"playerCaptionsTracklistRenderer":{"captionTracks":[{"baseUrl":"https://youtube.com/timedtext?v=test","vssId":".en","languageCode":"en"}]}}};'
+        }
+      ]
+    } as any;
+
+    const tracks = extractCaptionTracksFromDom(mockDoc);
+    expect(tracks).not.toBeNull();
+    expect(tracks).toHaveLength(1);
+    expect(tracks![0].languageCode).toBe('en');
   });
 });
