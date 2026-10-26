@@ -105,6 +105,7 @@ function partitionByL0Cache(blocks: TranslatableBlock[]): {
 
 let mutationObserver: MutationObserver | null = null;
 let mutationDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+let mutationDebounceFirstTime = 0;
 let isProcessingMutations = false;
 let processingMutationsStartTime = 0;
 let hasPendingMutations = false;
@@ -207,15 +208,24 @@ async function translateAndMountBlocks(
 }
 
 /**
- * 调度执行 DOM 增量变动翻译（防抖 + 队列防丢 + 视口优先）
+ * 调度执行 DOM 增量变动翻译（防抖 + 最大延迟保护 + 队列防丢 + 视口优先）
  */
 function processDynamicMutations(delay = 40): void {
+  const now = Date.now();
+  if (!mutationDebounceFirstTime) {
+    mutationDebounceFirstTime = now;
+  }
+
+  // 最大延迟守卫：若防抖积压等待已超过 120ms，强制在下一微任务立即执行，绝不因 DOM 高频细碎变动无限推迟
+  const effectiveDelay = now - mutationDebounceFirstTime > 120 && delay > 0 ? 0 : delay;
+
   if (mutationDebounceTimer) {
     clearTimeout(mutationDebounceTimer);
     mutationDebounceTimer = null;
   }
 
   mutationDebounceTimer = setTimeout(async () => {
+    mutationDebounceFirstTime = 0;
     if (!isPageTranslated || !isExtensionValid()) return;
 
     // 超时自愈守卫：若前序批次由于某些原因被挂起超过 8 秒，强制释放锁以恢复增量响应
@@ -467,6 +477,8 @@ function restoreOriginalPage(): void {
   console.log('[TranslateKing] 已恢复网页纯净原文');
 }
 
+let lastToggleTimestamp = 0;
+
 /**
  * 切换双语状态
  */
@@ -474,6 +486,14 @@ export function togglePageTranslation(
   targetLang: TargetLanguage = 'zh-CN',
   mode: TranslationMode = activeTranslationMode
 ): void {
+  const now = Date.now();
+  // 防抖保护：防止 Alt+T 快捷键在 DOM keydown 和 background chrome.commands 双重监听下发生同毫秒冲抵关停
+  if (now - lastToggleTimestamp < 400) {
+    console.warn('[TranslateKing] 忽略 400ms 内重复收到的切换指令（防止双重快捷键冲抵）');
+    return;
+  }
+  lastToggleTimestamp = now;
+
   if (isPageTranslated) {
     restoreOriginalPage();
   } else {
