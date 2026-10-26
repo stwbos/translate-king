@@ -21,14 +21,15 @@ export class SelectionFloatingCard {
   private constructor() {
     this.host = document.createElement('div');
     this.host.id = 'translate-king-bubble-host';
-    this.host.style.position = 'absolute';
+    this.host.style.position = 'fixed';
     this.host.style.zIndex = '2147483647';
+    this.host.style.pointerEvents = 'auto';
     this.host.style.display = 'none';
 
     this.shadow = this.host.attachShadow({ mode: 'open' });
     this.renderInitialStyles();
 
-    document.body.appendChild(this.host);
+    this.ensureHostMounted();
 
     // 预热浏览器 TTS 音色列表
     if (typeof window !== 'undefined' && window.speechSynthesis) {
@@ -40,19 +41,47 @@ export class SelectionFloatingCard {
       }
     }
 
-    // 点击网页空白区域自动关闭
-    document.addEventListener('mousedown', (e) => {
-      if (this.host.style.display === 'none') return;
-      const target = e.target as Node;
-      if (!this.host.contains(target)) {
-        this.hide();
-      }
-    });
+    // 捕获阶段监听鼠标按下：若点击在卡片外部，立即隐藏
+    document.addEventListener(
+      'mousedown',
+      (e) => {
+        if (this.host.style.display === 'none') return;
+        const target = e.target as Node;
+        if (!this.host.contains(target)) {
+          this.hide();
+        }
+      },
+      true
+    );
+
+    // 捕获阶段监听页面与内部滚动容器滚动：滚动时平滑隐藏浮窗，防止浮窗与文字错位脱节
+    if (typeof window !== 'undefined') {
+      window.addEventListener(
+        'scroll',
+        () => {
+          if (this.host.style.display !== 'none') {
+            this.hide();
+          }
+        },
+        { capture: true, passive: true }
+      );
+    }
 
     // 按 Escape 键关闭
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') this.hide();
     });
+  }
+
+  /**
+   * 确保卡片宿主元素正确挂载至当前文档树（兼容 SPA 动态重建或 body 晚就绪场景）
+   */
+  private ensureHostMounted(): void {
+    if (typeof document === 'undefined') return;
+    const root = document.body || document.documentElement;
+    if (root && !root.contains(this.host)) {
+      root.appendChild(this.host);
+    }
   }
 
   public static getInstance(): SelectionFloatingCard {
@@ -273,27 +302,58 @@ export class SelectionFloatingCard {
   }
 
   /**
-   * 智能定位与视口碰撞检测
+   * 智能定位与视口碰撞检测（基于 Viewport 纯视口固定坐标体系，彻底免受 body/html scroll 坐标漂移与容器溢出裁剪影响）
    */
   private positionNearRange(range: Range): void {
-    const rect = range.getBoundingClientRect();
+    this.ensureHostMounted();
+
+    let rect = range.getBoundingClientRect();
+    // 兼容 Blink/WebKit 在复杂嵌套 Flex/Grid 或行内块元素中偶尔返回空矩形的问题
+    if ((rect.width === 0 || rect.height === 0) && typeof range.getClientRects === 'function') {
+      const clientRects = range.getClientRects();
+      if (clientRects.length > 0) {
+        rect = clientRects[0];
+      }
+    }
+
+    // 若 Range 仍无法计算出尺寸，降级获取包含节点的矩形
+    if (rect.width === 0 && rect.height === 0 && range.startContainer) {
+      const containerEl = range.startContainer instanceof HTMLElement
+        ? range.startContainer
+        : range.startContainer.parentElement;
+      if (containerEl && typeof containerEl.getBoundingClientRect === 'function') {
+        rect = containerEl.getBoundingClientRect();
+      }
+    }
+
     const CARD_WIDTH = 320;
     const CARD_HEIGHT = 180;
     const PADDING = 12;
 
-    let left = rect.left + window.scrollX;
-    let top = rect.bottom + window.scrollY + 8;
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 1024;
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 768;
 
-    // 水平越界反弹检测
-    if (rect.left + CARD_WIDTH > window.innerWidth - PADDING) {
-      left = Math.max(PADDING, window.innerWidth - CARD_WIDTH - PADDING + window.scrollX);
+    let left = rect.left;
+    let top = rect.bottom + 8;
+
+    // 水平右侧越界反弹检测
+    if (left + CARD_WIDTH > viewportWidth - PADDING) {
+      left = Math.max(PADDING, viewportWidth - CARD_WIDTH - PADDING);
+    }
+    if (left < PADDING) {
+      left = PADDING;
     }
 
     // 垂直下方越界向上翻转
-    if (rect.bottom + CARD_HEIGHT > window.innerHeight) {
-      top = Math.max(PADDING, rect.top + window.scrollY - CARD_HEIGHT - 8);
+    if (top + CARD_HEIGHT > viewportHeight - PADDING) {
+      top = Math.max(PADDING, rect.top - CARD_HEIGHT - 8);
+    }
+    if (top < PADDING) {
+      top = PADDING;
     }
 
+    this.host.style.position = 'fixed';
+    this.host.style.zIndex = '2147483647';
     this.host.style.left = `${Math.round(left)}px`;
     this.host.style.top = `${Math.round(top)}px`;
   }

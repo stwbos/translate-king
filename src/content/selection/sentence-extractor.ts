@@ -9,11 +9,13 @@ function escapeRegExp(string: string): string {
 }
 
 /**
- * 清除生词边缘多余符号
+ * 清除生词边缘多余符号，并滤除 Twitter/X 等国际化单页应用中的零宽空格与方向控制字符
  */
 export function cleanWord(rawWord: string): string {
   if (!rawWord) return '';
-  return rawWord.trim().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
+  // 过滤 Unicode 零宽字符 (\u200B-\u200D, \uFEFF) 及从左至右 / 从右至左控制符 (\u200E, \u200F)
+  const sanitized = rawWord.replace(/[\u200B-\u200D\uFEFF\u200E\u200F]/g, '').trim();
+  return sanitized.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
 }
 
 /**
@@ -72,7 +74,7 @@ export function extractSentenceFromSelection(selection: Selection): string {
   if (!selectedText) return '';
 
   let container: Node | null = range.commonAncestorContainer;
-  while (container && container.nodeType !== Node.ELEMENT_NODE) {
+  while (container && container.nodeType !== 1 /* ELEMENT_NODE */) {
     container = container.parentNode;
   }
 
