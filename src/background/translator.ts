@@ -166,17 +166,17 @@ function recordFailure(key: string, error: unknown): void {
   state.failures++;
   console.warn(`[TranslateKing Gateway] 通道 ${state.name} 发生异常 (连续失败 ${state.failures} 次):`, error);
 
-  // 连续失败 2 次及以上，触发 60 秒熔断冷却
-  if (state.failures >= 2) {
-    state.cooldownUntil = Date.now() + 60_000;
-    console.error(`[TranslateKing Gateway] 通道 ${state.name} 已触发熔断！冷却 60 秒`);
+  // 连续失败 3 次及以上，触发 15 秒短熔断冷却
+  if (state.failures >= 3) {
+    state.cooldownUntil = Date.now() + 15_000;
+    console.error(`[TranslateKing Gateway] 通道 ${state.name} 已触发熔断！冷却 15 秒`);
   }
 }
 
 /**
- * 通用带超时的网络请求包装器
+ * 通用带超时的网络请求包装器 (默认 8000ms 宽裕超时，适应跨国网络与 VPN 代理环境)
  */
-async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = 3500): Promise<Response> {
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = 8000): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -205,7 +205,7 @@ async function callMicrosoft(texts: string[], targetLang: TargetLanguage): Promi
       'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 Edg/128.0.0.0'
     },
     body: JSON.stringify(texts)
-  }, 3500);
+  }, 8000);
 
   if (!response.ok) {
     throw new Error(`Microsoft 响应 HTTP ${response.status}`);
@@ -237,7 +237,7 @@ async function callGoogle(texts: string[], targetLang: TargetLanguage): Promise<
       'X-Goog-API-Key': GOOGLE_BROWSER_KEY
     },
     body: JSON.stringify([[wrapped, 'auto', targetLang], 'wt_lib'])
-  }, 3500);
+  }, 8000);
 
   if (!response.ok) {
     throw new Error(`Google 响应 HTTP ${response.status}`);
@@ -264,7 +264,7 @@ async function callGoogle(texts: string[], targetLang: TargetLanguage): Promise<
 // ----------------------------------------------------
 async function callMyMemory(text: string, targetLang: TargetLanguage): Promise<string> {
   const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=auto|${encodeURIComponent(targetLang)}`;
-  const response = await fetchWithTimeout(url, {}, 3500);
+  const response = await fetchWithTimeout(url, {}, 8000);
   if (!response.ok) {
     throw new Error(`MyMemory 响应 HTTP ${response.status}`);
   }

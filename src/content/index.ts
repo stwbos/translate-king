@@ -106,7 +106,9 @@ function partitionByL0Cache(blocks: TranslatableBlock[]): {
 let mutationObserver: MutationObserver | null = null;
 let mutationDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 let isProcessingMutations = false;
+let processingMutationsStartTime = 0;
 let hasPendingMutations = false;
+let translatingStartTime = 0;
 
 /**
  * 执行批次段落的发送与译文上屏挂载
@@ -124,8 +126,18 @@ async function translateAndMountBlocks(
 
   try {
     const response = await new Promise<TranslateBatchResponse>((resolve) => {
+      let resolved = false;
+      const watchdog = setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          console.warn('[TranslateKing] 批次翻译网络响应超时 (8.5s)，启动安全降级');
+          resolve({ translations: texts });
+        }
+      }, 8500);
+
       try {
         if (!isExtensionValid()) {
+          clearTimeout(watchdog);
           stopDynamicObserver();
           return resolve({ translations: [] });
         }
@@ -136,23 +148,31 @@ async function translateAndMountBlocks(
             toLang: targetLang
           },
           (res: TranslateBatchResponse) => {
-            if (chrome.runtime.lastError) {
-              const msg = chrome.runtime.lastError.message || '';
-              if (msg.includes('Extension context invalidated')) {
-                stopDynamicObserver();
-                return resolve({ translations: [] });
+            if (!resolved) {
+              resolved = true;
+              clearTimeout(watchdog);
+              if (chrome.runtime.lastError) {
+                const msg = chrome.runtime.lastError.message || '';
+                if (msg.includes('Extension context invalidated')) {
+                  stopDynamicObserver();
+                  return resolve({ translations: [] });
+                }
               }
+              resolve(res || { translations: texts });
             }
-            resolve(res);
           }
         );
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        if (msg.includes('Extension context invalidated')) {
-          stopDynamicObserver();
-          return resolve({ translations: [] });
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(watchdog);
+          const msg = e instanceof Error ? e.message : String(e);
+          if (msg.includes('Extension context invalidated')) {
+            stopDynamicObserver();
+            return resolve({ translations: [] });
+          }
+          resolve({ translations: texts });
         }
-        throw e;
       }
     });
 
@@ -198,12 +218,19 @@ function processDynamicMutations(delay = 40): void {
   mutationDebounceTimer = setTimeout(async () => {
     if (!isPageTranslated || !isExtensionValid()) return;
 
+    // 超时自愈守卫：若前序批次由于某些原因被挂起超过 8 秒，强制释放锁以恢复增量响应
     if (isProcessingMutations) {
-      hasPendingMutations = true;
-      return;
+      if (Date.now() - processingMutationsStartTime > 8000) {
+        console.warn('[TranslateKing] 发现增量处理锁超时挂起，执行自动复位解脱');
+        isProcessingMutations = false;
+      } else {
+        hasPendingMutations = true;
+        return;
+      }
     }
 
     isProcessingMutations = true;
+    processingMutationsStartTime = Date.now();
     try {
       const newBlocks = extractTranslatableBlocks(document);
       if (newBlocks.length > 0) {
@@ -264,6 +291,7 @@ function startDynamicObserver(): void {
     }
 
     let hasAddedNodes = false;
+    let isHighPriorityChat = false;
     for (const m of mutations) {
       for (let i = 0; i < m.addedNodes.length; i++) {
         const node = m.addedNodes[i];
@@ -277,6 +305,14 @@ function startDynamicObserver(): void {
             continue;
           }
           hasAddedNodes = true;
+          // 若变动节点与 X 私信/聊天气泡相关，标记高优先级极速上屏
+          if (
+            el.getAttribute?.('data-testid') === 'messageEntry' ||
+            el.getAttribute?.('data-testid') === 'conversation' ||
+            (typeof el.querySelector === 'function' && el.querySelector('[data-testid="messageEntry"], [data-testid="conversation"]'))
+          ) {
+            isHighPriorityChat = true;
+          }
           break;
         }
       }
@@ -284,7 +320,7 @@ function startDynamicObserver(): void {
     }
     if (!hasAddedNodes) return;
 
-    processDynamicMutations(40);
+    processDynamicMutations(isHighPriorityChat ? 10 : 40);
   });
 
   if (document.body) {
@@ -323,12 +359,18 @@ async function translateFullPage(
   forcePreempt = false
 ): Promise<void> {
   if (isTranslating && !forcePreempt) {
-    routeChangeQueued = true;
-    return;
+    if (Date.now() - translatingStartTime > 8000) {
+      console.warn('[TranslateKing] 发现全页翻译主锁超时挂起，执行自动复位解脱');
+      isTranslating = false;
+    } else {
+      routeChangeQueued = true;
+      return;
+    }
   }
 
   const sessionEpoch = ++currentSessionEpoch;
   isTranslating = true;
+  translatingStartTime = Date.now();
   routeChangeQueued = false;
 
   try {
@@ -509,10 +551,12 @@ document.addEventListener(
       triggerFastSpaCheck();
     }
 
-    // 针对私信聊天界面：若点击了具体的聊天会话项，启动聊天消息加载专属波段扫描
-    const isConversation = target.closest('[data-testid="conversation"]');
-    if (isConversation) {
-      const chatWaves = [60, 200, 500, 1000, 2000];
+    // 针对私信聊天界面与导航：若点击了具体的聊天会话项或私信入口，启动聊天消息加载专属波段扫描
+    const isChatTrigger = target.closest(
+      '[data-testid="conversation"], [data-testid="messageEntry"], [data-testid="AppTabBar_DirectMessage_Link"], a[href*="/messages"]'
+    );
+    if (isChatTrigger) {
+      const chatWaves = [30, 100, 250, 500, 1000, 2000];
       chatWaves.forEach((w) => {
         setTimeout(() => {
           if (isPageTranslated && isExtensionValid()) {

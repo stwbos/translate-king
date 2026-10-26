@@ -121,4 +121,68 @@ describe('X / Twitter 私信与聊天消息即时翻译专项测试 (Twitter DM 
     expect(snippetBlock).toBeDefined();
     expect(snippetBlock?.originalText).toBe('Let us sync up tomorrow morning.');
   });
+
+  it('5. 能够提取完全无 dir 属性的 React Native Web 原生聊天气泡，并彻底排除动作按钮与时间戳', () => {
+    const html = `
+      <div data-testid="DMConversationBody">
+        <div data-testid="messageEntry" role="row">
+          <div class="css-175oi2r r-1iusvr4">
+            <!-- 动作按钮区 -->
+            <div role="group" aria-label="Message actions">
+              <button aria-label="Add reaction"><svg></svg></button>
+              <button aria-label="Reply"><svg></svg></button>
+            </div>
+            <!-- 原生 React Native 气泡容器 (无 dir 属性) -->
+            <div class="css-175oi2r r-1pi2tsx">
+              <div class="css-14cqt7a r-3pj75a">
+                <span class="css-1j6292g">Could you send over the updated design files today?</span>
+              </div>
+              <div class="css-time">
+                <time datetime="2026-10-26T07:00:00Z">3:15 PM</time>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    const dom = new JSDOM(html);
+    const doc = dom.window.document;
+
+    const blocks = extractTranslatableBlocks(doc);
+    expect(blocks.length).toBe(1);
+    expect(blocks[0].originalText).toBe('Could you send over the updated design files today?');
+
+    // 验证能够成功注入翻译
+    injectTranslation(blocks[0], '你今天能把更新后的设计文件发过来吗？', 'bilingual');
+    expect(blocks[0].element.textContent).toContain('你今天能把更新后的设计文件发过来吗？');
+  });
+
+  it('6. 对话列表 (Conversations) 无 dir 属性时仍能提取联系人姓名与最后消息摘要', () => {
+    const html = `
+      <div data-testid="conversation" role="row">
+        <div class="conv-inner">
+          <div data-testid="User-Name">
+            <div class="name-box">
+              <span>Sarah Connor</span>
+            </div>
+          </div>
+          <div class="snippet-box">
+            <span>I will be back in 5 minutes.</span>
+          </div>
+          <time datetime="2026-10-26T07:10:00Z">5m</time>
+        </div>
+      </div>
+    `;
+
+    const dom = new JSDOM(html);
+    const doc = dom.window.document;
+
+    const blocks = extractTranslatableBlocks(doc);
+    expect(blocks.length).toBe(2);
+    const nameBlock = blocks.find((b) => b.originalText === 'Sarah Connor');
+    const snippetBlock = blocks.find((b) => b.originalText === 'I will be back in 5 minutes.');
+    expect(nameBlock).toBeDefined();
+    expect(snippetBlock).toBeDefined();
+  });
 });

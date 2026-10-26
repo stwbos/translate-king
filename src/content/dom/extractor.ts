@@ -136,12 +136,142 @@ const CHILD_BLOCK_SELECTOR = 'div, p, article, section, ul, ol, li, table, form,
 let blockCounter = 0;
 
 /**
+ * 阶段 0.1：X / Twitter 私信聊天气泡 (Direct Messages) 高精度专属提取器
+ * 穿透 React Native Web 复杂嵌套与按钮干扰，100% 提取气泡内的文本节点或正文容器
+ */
+function extractTwitterDmEntry(
+  entry: HTMLElement,
+  blocks: TranslatableBlock[],
+  processedElements: Set<HTMLElement>
+): void {
+  if (processedElements.has(entry) || isElementEffectivelyTranslated(entry)) return;
+  if (shouldIgnoreElement(entry)) return;
+
+  // 1. 查找是否存在官方推文/文本标识
+  const standardText = entry.querySelector<HTMLElement>('[data-testid="tweetText"], [data-testid="messageText"]');
+  if (standardText && !processedElements.has(standardText)) {
+    processElement(standardText, blocks, processedElements);
+    return;
+  }
+
+  // 2. 查找气泡内的 dir 容器 (dir="auto", dir="ltr", dir="rtl")
+  // 排除属于动作按钮区、输入框或时间戳的容器
+  const dirCandidates = Array.from(entry.querySelectorAll<HTMLElement>('[dir="auto"], [dir="ltr"], [dir="rtl"]'));
+  let foundDir = false;
+  for (const cand of dirCandidates) {
+    if (processedElements.has(cand)) continue;
+    if (cand.closest('button, [role="button"], [role="group"], time')) continue;
+    // 若 candidate 内部包含其他更深层的 dir 容器，让深层容器处理
+    if (cand.querySelector('[dir="auto"], [dir="ltr"], [dir="rtl"]')) continue;
+    processElement(cand, blocks, processedElements);
+    foundDir = true;
+  }
+  if (foundDir) return;
+
+  // 3. 兜底扫描：若没有 dir 容器，寻找 entry 中承载文本的非按钮非时间叶子元素 (针对无 dir 属性的 React Native Web 气泡)
+  const textLeaves = Array.from(entry.querySelectorAll<HTMLElement>('div, span'));
+  for (const leaf of textLeaves) {
+    if (processedElements.has(leaf)) continue;
+    if (leaf.closest('button, [role="button"], [role="group"], time, [data-testid*="avatar"]')) continue;
+    if (leaf.querySelector('div, button, time, svg')) continue;
+
+    const text = (leaf.textContent || '').trim();
+    if (isValidTranslatableText(text)) {
+      // 避免父级已收录时子级重复
+      let parentHasBlock = false;
+      let p: HTMLElement | null = leaf.parentElement;
+      while (p && p !== entry) {
+        if (processedElements.has(p)) {
+          parentHasBlock = true;
+          break;
+        }
+        p = p.parentElement;
+      }
+      if (!parentHasBlock) {
+        processElement(leaf, blocks, processedElements);
+      }
+    }
+  }
+}
+
+/**
+ * 阶段 0.2：X / Twitter 私信对话列表 (Conversations) 高精度专属提取器
+ */
+function extractTwitterConversationRow(
+  conv: HTMLElement,
+  blocks: TranslatableBlock[],
+  processedElements: Set<HTMLElement>
+): void {
+  if (processedElements.has(conv) || isElementEffectivelyTranslated(conv)) return;
+  if (shouldIgnoreElement(conv)) return;
+
+  // 1. 提取用户名
+  const userNameEl = conv.querySelector<HTMLElement>('[data-testid="User-Name"]');
+  if (userNameEl) {
+    const nameCandidates = Array.from(userNameEl.querySelectorAll<HTMLElement>('[dir="auto"], [dir="ltr"], span'));
+    for (const cand of nameCandidates) {
+      if (processedElements.has(cand)) continue;
+      if (cand.closest('time')) continue;
+      if (cand.querySelector('span, div')) continue;
+      processElement(cand, blocks, processedElements);
+    }
+  }
+
+  // 2. 提取最后一条私信摘要预览文本 (位于 User-Name 之外)
+  const allDirs = Array.from(conv.querySelectorAll<HTMLElement>('[dir="auto"], [dir="ltr"]'));
+  let foundSnippet = false;
+  for (const cand of allDirs) {
+    if (processedElements.has(cand)) continue;
+    if (cand.closest('[data-testid="User-Name"], time, button')) continue;
+    if (cand.querySelector('[dir="auto"], [dir="ltr"]')) continue;
+    processElement(cand, blocks, processedElements);
+    foundSnippet = true;
+  }
+
+  // 3. 兜底：若没有 dir 容器，提取 User-Name 之外的叶子文本
+  if (!foundSnippet) {
+    const leaves = Array.from(conv.querySelectorAll<HTMLElement>('div, span'));
+    for (const leaf of leaves) {
+      if (processedElements.has(leaf)) continue;
+      if (leaf.closest('[data-testid="User-Name"], time, button, [data-testid*="avatar"]')) continue;
+      if (leaf.querySelector('div, span, button, time')) continue;
+      const text = (leaf.textContent || '').trim();
+      if (isValidTranslatableText(text)) {
+        processElement(leaf, blocks, processedElements);
+      }
+    }
+  }
+}
+
+/**
  * 遍历 DOM 提取当前页面上承载语义的待翻译文本块
- * 采用“语义原子块优先 + 通用叶子文本容器兜底”策略，达到 Google 翻译同款 100% 覆盖率
+ * 采用“阶段0 Twitter私信专属引擎 + 阶段1 语义原子块优先 + 阶段2 通用叶子文本容器兜底”策略，达到 Google 翻译同款 100% 覆盖率
  */
 export function extractTranslatableBlocks(root: ParentNode = document): TranslatableBlock[] {
   const blocks: TranslatableBlock[] = [];
   const processedElements = new Set<HTMLElement>();
+
+  // ---------------------------------------------------------
+  // 阶段 0：X / Twitter 私信聊天 (Direct Messages & Conversations) 专用高鲁棒性提取引擎
+  // 针对 X 聊天界面 React Native Web 结构进行专用解析，100% 捕获气泡文本，彻底排除操作按钮与时间戳
+  // ---------------------------------------------------------
+  try {
+    const messageEntries = root.querySelectorAll<HTMLElement>(
+      '[data-testid="messageEntry"], [data-testid="message-entry"]'
+    );
+    for (let i = 0; i < messageEntries.length; i++) {
+      extractTwitterDmEntry(messageEntries[i], blocks, processedElements);
+    }
+
+    const conversationRows = root.querySelectorAll<HTMLElement>(
+      '[data-testid="conversation"]'
+    );
+    for (let i = 0; i < conversationRows.length; i++) {
+      extractTwitterConversationRow(conversationRows[i], blocks, processedElements);
+    }
+  } catch {
+    // 容错降级
+  }
 
   // ---------------------------------------------------------
   // 阶段 1：提取语义优先的原子块 (Tweets, 文章段落, 标题, 按钮)

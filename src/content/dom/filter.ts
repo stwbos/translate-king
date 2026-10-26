@@ -96,6 +96,17 @@ export function shouldIgnoreElement(element: Element): boolean {
     return true;
   }
 
+  // 严格保护时间标签及其外层紧致包装容器
+  if (element.tagName === 'TIME' || (typeof element.closest === 'function' && element.closest('time'))) {
+    return true;
+  }
+  if (typeof element.querySelector === 'function' && element.querySelector('time')) {
+    const timeEl = element.querySelector('time');
+    if (timeEl && element.textContent?.trim() === timeEl.textContent?.trim()) {
+      return true;
+    }
+  }
+
   // 参考文献区域保护：保护外层引文容器与回跳箭头，但允许引文中的正文超链接 (如参考文章标题外链) 进行独立翻译
   if (
     (typeof element.matches === 'function' && element.matches(REFERENCE_SELECTORS)) ||
@@ -191,8 +202,13 @@ export function isValidTranslatableText(text: string): boolean {
     return false;
   }
 
-  // 时间简写 (如 2h, 5m, 1d, 3w, 10s) 绝不翻译
-  if (/^\d+\s*[smhdwMy]$/.test(trimmed)) {
+  // 时间与时钟时间戳 (如 3:15 PM, 12:00 AM, 14:30, 2h, 5m, 1d, 3w, 10s, 3 mins ago) 绝不翻译
+  if (/^\d{1,2}:\d{2}(?::\d{2})?\s*(?:[ap]\.?m\.?)?$/i.test(trimmed)) {
+    return false;
+  }
+
+  // 时间简写 (如 2h, 5m, 1d, 3w, 10s, 5 mins) 绝不翻译
+  if (/^\d+\s*(?:[smhdwMy]|sec|secs|min|mins|hr|hrs|day|days|week|weeks|month|months|year|years|ago)$/i.test(trimmed)) {
     return false;
   }
 

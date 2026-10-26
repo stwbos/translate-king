@@ -36,6 +36,19 @@
   display: block !important;
 }
 
+/* X / Twitter 私信聊天气泡内嵌双语排版适配 */
+[data-testid="messageEntry"] .translate-king-wrapper {
+  margin-top: 4px !important;
+  margin-bottom: 2px !important;
+  display: block !important;
+}
+
+[data-testid="messageEntry"] .translate-king-wrapper .translate-king-text {
+  font-size: 0.9em !important;
+  padding: 2px 6px !important;
+  border-radius: 4px !important;
+}
+
 /* 暗黑模式自适应（系统偏好 或 网页暗黑属性） */
 @media (prefers-color-scheme: dark) {
   .translate-king-wrapper .translate-king-text {
