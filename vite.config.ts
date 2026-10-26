@@ -10,12 +10,14 @@ export default defineConfig({
         popup: resolve(__dirname, 'popup.html'),
         background: resolve(__dirname, 'src/background/index.ts'),
         content: resolve(__dirname, 'src/content/index.ts'),
+        'yt-bridge': resolve(__dirname, 'src/content/youtube/yt-bridge.ts'),
         'content-style': resolve(__dirname, 'src/content/content.css')
       },
       output: {
         entryFileNames: (chunkInfo) => {
           if (chunkInfo.name === 'background') return 'background.js';
           if (chunkInfo.name === 'content') return 'content.js';
+          if (chunkInfo.name === 'yt-bridge') return 'yt-bridge.js';
           return 'assets/[name].js';
         },
         chunkFileNames: 'assets/[name].js',

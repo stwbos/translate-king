@@ -78,6 +78,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   // 2. 查询当前标签页的翻译状态
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
+  const ytNotice = document.getElementById('ytNotice') as HTMLElement | null;
+  if (tab?.url && tab.url.includes('youtube.com')) {
+    if (ytNotice) ytNotice.style.display = 'block';
+  }
+
   const queryPageStatus = (tabId: number, url?: string) => {
     chrome.tabs.sendMessage(tabId, { type: 'GET_PAGE_STATUS' }, async (response) => {
       if (chrome.runtime.lastError || !response) {
