@@ -79,13 +79,6 @@ export const ATOMIC_BLOCK_SELECTORS = [
   '[data-testid="message-entry"] [dir="ltr"]',
   '[data-testid="conversation"] [dir="auto"]',
   '[data-testid="conversation"] [dir="ltr"]',
-  'div[aria-label="Timeline: Messages"] div[dir="auto"]',
-  'div[aria-label*="Messages"] [data-testid="messageEntry"]',
-  'div[aria-label*="私信"] [data-testid="messageEntry"]',
-  '[data-testid="DMConversationBody"] div[dir="auto"]',
-  '[data-testid="DMDrawer"] div[dir="auto"]',
-  'section[aria-label="Direct Messages"] div[dir="auto"]',
-  'section[aria-label*="私信"] div[dir="auto"]',
 
   // 3. 标题与栏目名称 (如 "Who to follow", "Trends for you", "What's happening")
   '[role="heading"]',
@@ -147,24 +140,37 @@ function extractTwitterDmEntry(
   if (processedElements.has(entry) || isElementEffectivelyTranslated(entry)) return;
   if (shouldIgnoreElement(entry)) return;
 
+  // 严禁提取私信发信输入框与工具栏
+  if (
+    entry.closest?.('[data-testid="DMComposer"], [data-testid="dmComposerTextInput"], [role="textbox"]') ||
+    entry.querySelector?.('[data-testid="DMComposerTextInput"]')
+  ) {
+    return;
+  }
+
   // 1. 查找是否存在官方推文/文本标识
   const standardText = entry.querySelector<HTMLElement>('[data-testid="tweetText"], [data-testid="messageText"]');
-  if (standardText && !processedElements.has(standardText)) {
+  if (standardText && !processedElements.has(standardText) && !standardText.closest('button, time')) {
     processElement(standardText, blocks, processedElements);
     return;
   }
 
   // 2. 查找气泡内的 dir 容器 (dir="auto", dir="ltr", dir="rtl")
-  // 排除属于动作按钮区、输入框或时间戳的容器
+  // 排除属于动作按钮区 (<button>)、时间戳 (<time>) 或输入框的容器
+  // 注意：绝不使用 cand.closest('[role="group"]') 或 cand.closest('[role="button"]')，因为 Twitter 消息行或 Touchable 气泡自身即挂载这些属性
   const dirCandidates = Array.from(entry.querySelectorAll<HTMLElement>('[dir="auto"], [dir="ltr"], [dir="rtl"]'));
   let foundDir = false;
   for (const cand of dirCandidates) {
     if (processedElements.has(cand)) continue;
-    if (cand.closest('button, [role="button"], [role="group"], time')) continue;
+    if (cand.closest('button, time, [data-testid*="avatar"], [data-testid="DMComposer"]')) continue;
     // 若 candidate 内部包含其他更深层的 dir 容器，让深层容器处理
     if (cand.querySelector('[dir="auto"], [dir="ltr"], [dir="rtl"]')) continue;
-    processElement(cand, blocks, processedElements);
-    foundDir = true;
+
+    const text = (cand.textContent || '').trim();
+    if (isValidTranslatableText(text)) {
+      processElement(cand, blocks, processedElements);
+      foundDir = true;
+    }
   }
   if (foundDir) return;
 
@@ -172,7 +178,7 @@ function extractTwitterDmEntry(
   const textLeaves = Array.from(entry.querySelectorAll<HTMLElement>('div, span'));
   for (const leaf of textLeaves) {
     if (processedElements.has(leaf)) continue;
-    if (leaf.closest('button, [role="button"], [role="group"], time, [data-testid*="avatar"]')) continue;
+    if (leaf.closest('button, time, [data-testid*="avatar"], [data-testid="DMComposer"]')) continue;
     if (leaf.querySelector('div, button, time, svg')) continue;
 
     const text = (leaf.textContent || '').trim();
@@ -253,14 +259,28 @@ export function extractTranslatableBlocks(root: ParentNode = document): Translat
 
   // ---------------------------------------------------------
   // 阶段 0：X / Twitter 私信聊天 (Direct Messages & Conversations) 专用高鲁棒性提取引擎
+  // 覆盖全量消息容器：messageEntry、cellInnerDiv、DMConversation、DMChatTranscript、私信 Timeline
   // 针对 X 聊天界面 React Native Web 结构进行专用解析，100% 捕获气泡文本，彻底排除操作按钮与时间戳
   // ---------------------------------------------------------
   try {
-    const messageEntries = root.querySelectorAll<HTMLElement>(
-      '[data-testid="messageEntry"], [data-testid="message-entry"]'
+    const chatCells = root.querySelectorAll<HTMLElement>(
+      [
+        '[data-testid="messageEntry"]',
+        '[data-testid="message-entry"]',
+        '[data-testid="DMConversation"] [data-testid="cellInnerDiv"]',
+        '[data-testid="DMChatTranscript"] [data-testid="cellInnerDiv"]',
+        '[data-testid="DMConversationBody"] [data-testid="cellInnerDiv"]',
+        '[data-testid="DMDrawer"] [data-testid="cellInnerDiv"]',
+        'div[aria-label*="Messages"] [data-testid="cellInnerDiv"]',
+        'div[aria-label*="私信"] [data-testid="cellInnerDiv"]',
+        'section[aria-label*="Messages"] [data-testid="cellInnerDiv"]',
+        'section[aria-label*="私信"] [data-testid="cellInnerDiv"]',
+        '[data-testid="DMConversation"] [role="row"]',
+        '[data-testid="DMChatTranscript"] [role="row"]'
+      ].join(',')
     );
-    for (let i = 0; i < messageEntries.length; i++) {
-      extractTwitterDmEntry(messageEntries[i], blocks, processedElements);
+    for (let i = 0; i < chatCells.length; i++) {
+      extractTwitterDmEntry(chatCells[i], blocks, processedElements);
     }
 
     const conversationRows = root.querySelectorAll<HTMLElement>(
@@ -418,7 +438,12 @@ function processElement(
     (el.querySelector('[data-tk-id], [data-tk-replaced]') ||
       el.querySelector('button, [data-testid$="-follow"], [data-testid="UserCell"], [data-testid="tweet"], article') ||
       (el.querySelector('[data-testid="User-Name"]') && el.getAttribute('data-testid') !== 'User-Name') ||
-      ((el.tagName === 'BUTTON' || el.getAttribute('role') === 'button') && rawText.length > 50))
+      ((el.tagName === 'BUTTON' ||
+        (el.getAttribute('role') === 'button' &&
+          !el.closest(
+            '[data-testid="messageEntry"], [data-testid="cellInnerDiv"], [data-testid="DMConversation"], [data-testid="DMChatTranscript"]'
+          ))) &&
+        rawText.length > 50))
   ) {
     return;
   }

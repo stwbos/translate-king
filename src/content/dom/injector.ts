@@ -48,7 +48,16 @@ function findAllNonEmptyTextNodes(root: Node, doc: Document): Text[] {
 
 function isInteractiveButton(el: HTMLElement): boolean {
   if (el.tagName === 'BUTTON') return true;
-  if (el.getAttribute('role') === 'button') return true;
+  // 聊天私信气泡容器（React Native Web Touchable/Pressable 常挂载 role="button"）绝不能视为操作按钮
+  if (
+    el.getAttribute('role') === 'button' &&
+    !el.closest(
+      '[data-testid="messageEntry"], [data-testid="cellInnerDiv"], [data-testid="DMConversation"], [data-testid="DMChatTranscript"]'
+    ) &&
+    (el.textContent || '').trim().length <= 50
+  ) {
+    return true;
+  }
   if (el.tagName === 'A' && (el.classList.contains('btn') || el.classList.contains('button'))) return true;
   return false;
 }

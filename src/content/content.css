@@ -37,16 +37,42 @@
 }
 
 /* X / Twitter 私信聊天气泡内嵌双语排版适配 */
-[data-testid="messageEntry"] .translate-king-wrapper {
+[data-testid="messageEntry"] .translate-king-wrapper,
+[data-testid="cellInnerDiv"] .translate-king-wrapper,
+[data-testid="DMConversation"] .translate-king-wrapper,
+[data-testid="DMChatTranscript"] .translate-king-wrapper,
+[data-testid="DMConversationBody"] .translate-king-wrapper,
+div[aria-label*="私信"] .translate-king-wrapper,
+div[aria-label*="Messages"] .translate-king-wrapper {
   margin-top: 4px !important;
   margin-bottom: 2px !important;
   display: block !important;
+  clear: both !important;
 }
 
-[data-testid="messageEntry"] .translate-king-wrapper .translate-king-text {
+[data-testid="messageEntry"] .translate-king-wrapper .translate-king-text,
+[data-testid="cellInnerDiv"] .translate-king-wrapper .translate-king-text,
+[data-testid="DMConversation"] .translate-king-wrapper .translate-king-text,
+[data-testid="DMChatTranscript"] .translate-king-wrapper .translate-king-text,
+[data-testid="DMConversationBody"] .translate-king-wrapper .translate-king-text,
+div[aria-label*="私信"] .translate-king-wrapper .translate-king-text,
+div[aria-label*="Messages"] .translate-king-wrapper .translate-king-text {
   font-size: 0.9em !important;
+  line-height: 1.4 !important;
   padding: 2px 6px !important;
   border-radius: 4px !important;
+  word-break: break-word !important;
+}
+
+/* X 私信发出的气泡（蓝色背景 #1d9bf0）高对比度适配：白字白底，保证绝不出现蓝底蓝字看不清 */
+[data-testid="messageEntry"] [style*="1d9bf0"] .translate-king-wrapper .translate-king-text,
+[data-testid="cellInnerDiv"] [style*="1d9bf0"] .translate-king-wrapper .translate-king-text,
+[data-testid="messageEntry"] .r-1wtj0ep .translate-king-wrapper .translate-king-text,
+[data-testid="cellInnerDiv"] .r-1wtj0ep .translate-king-wrapper .translate-king-text,
+.bubble-out .translate-king-wrapper .translate-king-text {
+  color: #ffffff !important;
+  background: rgba(255, 255, 255, 0.22) !important;
+  border-left: 3px solid #ffffff !important;
 }
 
 /* 暗黑模式自适应（系统偏好 或 网页暗黑属性） */

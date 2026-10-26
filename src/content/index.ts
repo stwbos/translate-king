@@ -309,14 +309,19 @@ function startDynamicObserver(): void {
           if (
             el.getAttribute?.('data-testid') === 'messageEntry' ||
             el.getAttribute?.('data-testid') === 'conversation' ||
-            (typeof el.querySelector === 'function' && el.querySelector('[data-testid="messageEntry"], [data-testid="conversation"]'))
+            el.getAttribute?.('data-testid') === 'cellInnerDiv' ||
+            el.getAttribute?.('data-testid') === 'DMConversation' ||
+            el.getAttribute?.('data-testid') === 'DMChatTranscript' ||
+            (typeof el.querySelector === 'function' &&
+              el.querySelector(
+                '[data-testid="messageEntry"], [data-testid="conversation"], [data-testid="cellInnerDiv"], [data-testid="DMConversation"]'
+              ))
           ) {
             isHighPriorityChat = true;
+            break;
           }
-          break;
         }
       }
-      if (hasAddedNodes) break;
     }
     if (!hasAddedNodes) return;
 
@@ -514,7 +519,7 @@ function handleSpaRouteChange(): void {
   translateFullPage(activeTargetLang, activeTranslationMode, true);
 
   // 针对复杂单页（如 X 聊天 /messages、GraphQL 异步渲染列表），发起高频密集波段自愈探测
-  const waves = [50, 200, 500, 1000, 2000];
+  const waves = [30, 80, 160, 320, 600, 1200, 2000, 3500];
   waves.forEach((delay) => {
     setTimeout(() => {
       if (isPageTranslated && isExtensionValid()) {
@@ -545,7 +550,7 @@ document.addEventListener(
     if (!target) return;
 
     const navElement = target.closest(
-      'a, [role="link"], [role="tab"], [data-testid="conversation"], [data-testid="messageEntry"], [data-testid="AppTabBar_DirectMessage_Link"], [data-testid="SideNav_NewTweet_Button"]'
+      'a, [role="link"], [role="tab"], [data-testid="conversation"], [data-testid="messageEntry"], [data-testid="cellInnerDiv"], [data-testid="AppTabBar_DirectMessage_Link"], [data-testid="SideNav_NewTweet_Button"]'
     );
     if (navElement) {
       triggerFastSpaCheck();
@@ -553,10 +558,10 @@ document.addEventListener(
 
     // 针对私信聊天界面与导航：若点击了具体的聊天会话项或私信入口，启动聊天消息加载专属波段扫描
     const isChatTrigger = target.closest(
-      '[data-testid="conversation"], [data-testid="messageEntry"], [data-testid="AppTabBar_DirectMessage_Link"], a[href*="/messages"]'
+      '[data-testid="conversation"], [data-testid="messageEntry"], [data-testid="cellInnerDiv"], [data-testid="DMConversation"], [data-testid="DMChatTranscript"], [data-testid="AppTabBar_DirectMessage_Link"], a[href*="/messages"], [aria-label*="私信"], [aria-label*="Messages" i]'
     );
     if (isChatTrigger) {
-      const chatWaves = [30, 100, 250, 500, 1000, 2000];
+      const chatWaves = [25, 80, 160, 320, 600, 1200, 2000, 3500];
       chatWaves.forEach((w) => {
         setTimeout(() => {
           if (isPageTranslated && isExtensionValid()) {

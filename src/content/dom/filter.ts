@@ -48,12 +48,15 @@ const NOISE_SELECTORS = [
  * 则自动清除过期脏标记，允许自愈式重新提取与翻译。
  */
 export function isElementEffectivelyTranslated(el: Element): boolean {
-  // 1. 如果自身是翻译容器，或包含有效的双语译文容器，视为有效翻译
-  if (
-    el.classList?.contains('translate-king-wrapper') ||
-    (typeof el.querySelector === 'function' && el.querySelector('.translate-king-wrapper'))
-  ) {
-    return true;
+  // 1. 如果自身是已完成的翻译容器，或包含有效的已完成双语译文容器，视为有效翻译
+  if (el.classList?.contains('translate-king-wrapper')) {
+    return el.classList.contains('translate-king-done');
+  }
+  if (typeof el.querySelector === 'function') {
+    const doneWrapper = el.querySelector('.translate-king-wrapper.translate-king-done');
+    if (doneWrapper) {
+      return true;
+    }
   }
 
   // 2. 如果存在直接替换标记，检查其内容是否依然维持译文状态
