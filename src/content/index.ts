@@ -18,6 +18,7 @@ import { extractSentenceFromSelection, cleanWord } from './selection/sentence-ex
 import { SelectionFloatingCard } from './selection/floating-card';
 import { TargetLanguage, TranslationMode, RuntimeMessage, TranslateBatchResponse } from '../types';
 import { WordLookupResult } from '../background/dictionary';
+import { setupYouTubeLifecycle } from './youtube';
 
 /**
  * 校验扩展上下文生命周期状态（避免扩展被开发者刷新后旧标签页 Content Script 失效报红）
@@ -64,6 +65,7 @@ if (typeof chrome !== 'undefined' && chrome.storage?.local) {
         const newLang = changes.targetLang.newValue as TargetLanguage;
         if (newLang) {
           activeTargetLang = newLang;
+          setupYouTubeLifecycle(activeTargetLang);
         }
       }
       if (changes.enableSelection) {
@@ -71,6 +73,9 @@ if (typeof chrome !== 'undefined' && chrome.storage?.local) {
       }
     }
   });
+
+  // 启动 YouTube 实时双语字幕引擎监听
+  setupYouTubeLifecycle(activeTargetLang);
 }
 
 /**
