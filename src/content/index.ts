@@ -112,6 +112,88 @@ let hasPendingMutations = false;
 let translatingStartTime = 0;
 
 /**
+ * 发送批次翻译指令，内建针对休眠 Service Worker 唤醒重试机制 (最多 2 次重试，退避 200ms)
+ */
+async function sendBatchMessageWithRetry(
+  texts: string[],
+  targetLang: TargetLanguage
+): Promise<TranslateBatchResponse> {
+  const maxRetries = 2;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    if (!isExtensionValid() || !isPageTranslated) {
+      return { translations: [] };
+    }
+
+    try {
+      const result = await new Promise<TranslateBatchResponse>((resolve, reject) => {
+        let done = false;
+        const timer = setTimeout(() => {
+          if (!done) {
+            done = true;
+            reject(new Error('BATCH_RESPONSE_TIMEOUT'));
+          }
+        }, 8000);
+
+        try {
+          chrome.runtime.sendMessage(
+            {
+              type: 'TRANSLATE_BATCH',
+              texts,
+              toLang: targetLang
+            },
+            (res: TranslateBatchResponse) => {
+              if (done) return;
+              done = true;
+              clearTimeout(timer);
+
+              if (chrome.runtime.lastError) {
+                const msg = chrome.runtime.lastError.message || '';
+                if (msg.includes('Extension context invalidated')) {
+                  stopDynamicObserver();
+                  return resolve({ translations: [] });
+                }
+                reject(new Error(msg));
+              } else {
+                resolve(res || { translations: texts });
+              }
+            }
+          );
+        } catch (err) {
+          if (!done) {
+            done = true;
+            clearTimeout(timer);
+            const msg = err instanceof Error ? err.message : String(err);
+            if (msg.includes('Extension context invalidated')) {
+              stopDynamicObserver();
+              return resolve({ translations: [] });
+            }
+            reject(err);
+          }
+        }
+      });
+
+      if (result && Array.isArray(result.translations) && result.translations.length === texts.length) {
+        return result;
+      }
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      if (errMsg.includes('Extension context invalidated')) {
+        stopDynamicObserver();
+        return { translations: [] };
+      }
+      if (attempt < maxRetries) {
+        // 给可能休眠刚被唤醒的 Service Worker 留出就绪时间
+        await new Promise((r) => setTimeout(r, 200));
+      } else {
+        console.warn('[TranslateKing] 批次翻译网络响应重试耗尽，启用降级原文:', errMsg);
+      }
+    }
+  }
+
+  return { translations: texts };
+}
+
+/**
  * 执行批次段落的发送与译文上屏挂载
  */
 async function translateAndMountBlocks(
@@ -126,56 +208,7 @@ async function translateAndMountBlocks(
   const texts = blocks.map((b) => b.originalText);
 
   try {
-    const response = await new Promise<TranslateBatchResponse>((resolve) => {
-      let resolved = false;
-      const watchdog = setTimeout(() => {
-        if (!resolved) {
-          resolved = true;
-          console.warn('[TranslateKing] 批次翻译网络响应超时 (8.5s)，启动安全降级');
-          resolve({ translations: texts });
-        }
-      }, 8500);
-
-      try {
-        if (!isExtensionValid()) {
-          clearTimeout(watchdog);
-          stopDynamicObserver();
-          return resolve({ translations: [] });
-        }
-        chrome.runtime.sendMessage(
-          {
-            type: 'TRANSLATE_BATCH',
-            texts,
-            toLang: targetLang
-          },
-          (res: TranslateBatchResponse) => {
-            if (!resolved) {
-              resolved = true;
-              clearTimeout(watchdog);
-              if (chrome.runtime.lastError) {
-                const msg = chrome.runtime.lastError.message || '';
-                if (msg.includes('Extension context invalidated')) {
-                  stopDynamicObserver();
-                  return resolve({ translations: [] });
-                }
-              }
-              resolve(res || { translations: texts });
-            }
-          }
-        );
-      } catch (e) {
-        if (!resolved) {
-          resolved = true;
-          clearTimeout(watchdog);
-          const msg = e instanceof Error ? e.message : String(e);
-          if (msg.includes('Extension context invalidated')) {
-            stopDynamicObserver();
-            return resolve({ translations: [] });
-          }
-          resolve({ translations: texts });
-        }
-      }
-    });
+    const response = await sendBatchMessageWithRetry(texts, targetLang);
 
     // 关键守卫：如果在网络请求期间用户已触发还原原文或扩展已卸载，立即丢弃
     if (!isPageTranslated || !isExtensionValid()) {
@@ -374,7 +407,7 @@ async function translateFullPage(
   forcePreempt = false
 ): Promise<void> {
   if (isTranslating && !forcePreempt) {
-    if (Date.now() - translatingStartTime > 8000) {
+    if (Date.now() - translatingStartTime > 5000) {
       console.warn('[TranslateKing] 发现全页翻译主锁超时挂起，执行自动复位解脱');
       isTranslating = false;
     } else {
@@ -494,10 +527,19 @@ export function togglePageTranslation(
   }
   lastToggleTimestamp = now;
 
-  if (isPageTranslated) {
+  // 关键自愈校验：检查页面上当前是否确实存在生效中的译文节点
+  const activeTranslationCount = typeof document !== 'undefined'
+    ? document.querySelectorAll('.translate-king-wrapper.translate-king-done, [data-tk-replaced]').length
+    : 0;
+
+  // 如果之前标记为已翻译，但页面实际上没有任何译文（例如页面放置很久后被单页框架重新渲染回英文、或初次翻译未成功上屏）
+  // 则绝不执行“还原原文”，而是强制复位状态并立即重新触发全页翻译！
+  if (isPageTranslated && activeTranslationCount > 0) {
     restoreOriginalPage();
   } else {
-    translateFullPage(targetLang, mode);
+    isPageTranslated = false;
+    isTranslating = false; // 强制解除任何陈旧挂起锁
+    translateFullPage(targetLang, mode, true);
   }
 }
 
@@ -742,13 +784,45 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
     togglePageTranslation(message.targetLang || activeTargetLang, message.mode || activeTranslationMode);
     sendResponse({ success: true, isTranslated: isPageTranslated, mode: activeTranslationMode });
   } else if (message.type === 'GET_PAGE_STATUS') {
+    const activeCount = typeof document !== 'undefined'
+      ? document.querySelectorAll('.translate-king-wrapper.translate-king-done, [data-tk-replaced]').length
+      : 0;
+    // 如果 DOM 节点中已经没有译文（如页面放置过久被前端框架重新渲染回英文），校准内部状态
+    if (activeCount === 0 && isPageTranslated && !isTranslating) {
+      isPageTranslated = false;
+    }
     sendResponse({
-      isTranslated: isPageTranslated,
+      isTranslated: isPageTranslated && activeCount > 0,
       isTranslating: isTranslating,
       mode: activeTranslationMode,
-      totalBlocks: document.querySelectorAll('[data-tk-id]').length
+      totalBlocks: activeCount
     });
   }
 });
+
+// -----------------------------------------------------------------
+// 监听浏览器标签页前后台可见性切换 (解决网页开久了/电脑休眠唤醒后无法翻译的问题)
+// -----------------------------------------------------------------
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      // 1. 如果翻译锁挂起超过 4 秒，强制复位解脱
+      if (isTranslating && Date.now() - translatingStartTime > 4000) {
+        console.warn('[TranslateKing] 标签页切回前台：发现陈旧未释放翻译锁，自动复位');
+        isTranslating = false;
+      }
+      // 2. 如果页面状态是已翻译，但检测到译文被前端框架刷掉（例如 Twitter/Reddit 闲置后切回），自动触发增量自愈
+      if (isPageTranslated) {
+        const activeCount = document.querySelectorAll(
+          '.translate-king-wrapper.translate-king-done, [data-tk-replaced]'
+        ).length;
+        if (activeCount === 0) {
+          console.log('[TranslateKing] 标签页切回前台：译文节点已失活，自动调度增量翻译自愈');
+          processDynamicMutations(30);
+        }
+      }
+    }
+  });
+}
 
 console.log('[TranslateKing] Content script ready. Progressive Viewport-First + Dynamic SPA support enabled.');

@@ -61,12 +61,49 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
   }
 });
 
+/**
+ * 向指定标签页发送切换翻译指令，若标签页长时间开启导致 Content Script 失联或未注入，
+ * 则自动通过 chrome.scripting 重新动态注入 content.js 并自动重发指令（自愈保活）
+ */
+async function sendToggleToTabWithAutoHeal(tabId: number, url?: string): Promise<void> {
+  chrome.tabs.sendMessage(tabId, { type: 'TOGGLE_PAGE_TRANSLATION' }, async () => {
+    if (chrome.runtime.lastError) {
+      const isInjectable =
+        url && (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('file://'));
+
+      if (isInjectable && chrome.scripting) {
+        try {
+          await chrome.scripting.executeScript({
+            target: { tabId },
+            files: ['content.js']
+          });
+          await chrome.scripting.insertCSS({
+            target: { tabId },
+            files: ['content.css']
+          }).catch(() => {});
+
+          setTimeout(() => {
+            chrome.tabs.sendMessage(tabId, { type: 'TOGGLE_PAGE_TRANSLATION' }, () => {
+              // 消耗掉可能存在的错误
+              if (chrome.runtime.lastError) {
+                // 忽略
+              }
+            });
+          }, 80);
+        } catch (err) {
+          console.warn('[TranslateKing Background] 无法向标签页注入脚本:', err);
+        }
+      }
+    }
+  });
+}
+
 // 监听快捷键 (Alt+T) 切换当前活跃标签页的翻译
 chrome.commands.onCommand.addListener(async (command) => {
   if (command === 'toggle-translation') {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (tab?.id) {
-      chrome.tabs.sendMessage(tab.id, { type: 'TOGGLE_PAGE_TRANSLATION' });
+      sendToggleToTabWithAutoHeal(tab.id, tab.url);
     }
   }
 });
@@ -82,7 +119,7 @@ chrome.runtime.onInstalled.addListener(() => {
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === 'translate-king-toggle' && tab?.id) {
-    chrome.tabs.sendMessage(tab.id, { type: 'TOGGLE_PAGE_TRANSLATION' });
+    sendToggleToTabWithAutoHeal(tab.id, tab.url);
   }
 });
 
