@@ -41,31 +41,14 @@ export class SelectionFloatingCard {
       }
     }
 
-    // 捕获阶段监听鼠标按下：若点击在卡片外部，立即隐藏
-    document.addEventListener(
-      'mousedown',
-      (e) => {
-        if (this.host.style.display === 'none') return;
-        const target = e.target as Node;
-        if (!this.host.contains(target)) {
-          this.hide();
-        }
-      },
-      true
-    );
-
-    // 捕获阶段监听页面与内部滚动容器滚动：滚动时平滑隐藏浮窗，防止浮窗与文字错位脱节
-    if (typeof window !== 'undefined') {
-      window.addEventListener(
-        'scroll',
-        () => {
-          if (this.host.style.display !== 'none') {
-            this.hide();
-          }
-        },
-        { capture: true, passive: true }
-      );
-    }
+    // 鼠标点击网页其他区域自动隐藏浮窗
+    document.addEventListener('mousedown', (e) => {
+      if (this.host.style.display === 'none') return;
+      const target = e.target as Node;
+      if (!this.host.contains(target)) {
+        this.hide();
+      }
+    });
 
     // 按 Escape 键关闭
     document.addEventListener('keydown', (e) => {

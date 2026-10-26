@@ -628,14 +628,7 @@ setInterval(() => {
 
 // -----------------------------------------------------------------
 // 鼠标划词悬浮释义与语境捕获逻辑 (支持中英双向智能互译)
-// 深度适配 Twitter/X (React Native for Web) 等高度组件化应用：
-// 1. 捕获阶段 (Capture Phase) 监听，彻底突破 React 事件系统与 Responder 的 stopPropagation 拦截
-// 2. 浏览器原生 selectionchange 终极兜底保障，无论双击、三击、拖拽或 Shift 键盘选词均能 100% 毫秒级捕获
-// 3. 支持聊天输入框 (Input/Textarea) 与富文本气泡等全域划词
 // -----------------------------------------------------------------
-
-let isPointerOrMouseDown = false;
-let selectionDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
 export function triggerSelectionLookup(): void {
   if (!enableSelection || !isExtensionValid()) {
@@ -643,43 +636,12 @@ export function triggerSelectionLookup(): void {
   }
 
   const selection = window.getSelection();
-
-  // 1. 优先尝试从标准 DOM Selection 获取选区
-  let rawText = '';
-  let range: Range | null = null;
-
-  if (selection && !selection.isCollapsed && selection.rangeCount > 0) {
-    rawText = selection.toString().trim();
-    try {
-      range = selection.getRangeAt(0);
-    } catch (_) {
-      range = null;
-    }
+  if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
+    return;
   }
 
-  // 2. 若 DOM Selection 为空，降级探测当前活跃的输入框 (Textarea / Input)
+  const rawText = selection.toString().trim();
   if (!rawText) {
-    const activeEl = document.activeElement;
-    if (activeEl instanceof HTMLInputElement || activeEl instanceof HTMLTextAreaElement) {
-      const start = activeEl.selectionStart;
-      const end = activeEl.selectionEnd;
-      if (start !== null && end !== null && start < end) {
-        rawText = activeEl.value.substring(start, end).trim();
-        try {
-          const rect = activeEl.getBoundingClientRect();
-          range = {
-            getBoundingClientRect: () => rect,
-            getClientRects: () => [rect] as unknown as DOMRectList,
-            startContainer: activeEl,
-            endContainer: activeEl,
-            commonAncestorContainer: activeEl
-          } as unknown as Range;
-        } catch (_) {}
-      }
-    }
-  }
-
-  if (!rawText || !range) {
     return;
   }
 
@@ -713,11 +675,16 @@ export function triggerSelectionLookup(): void {
     lookupTargetLang = 'zh-CN';
   }
 
+  let range: Range;
+  try {
+    range = selection.getRangeAt(0);
+  } catch (_) {
+    return;
+  }
+
   let sentence = word;
   try {
-    if (selection && selection.rangeCount > 0) {
-      sentence = extractSentenceFromSelection(selection) || word;
-    }
+    sentence = extractSentenceFromSelection(selection) || word;
   } catch (_) {
     sentence = word;
   }
@@ -745,7 +712,7 @@ export function triggerSelectionLookup(): void {
           card.hide();
           return;
         }
-        card.showResult(range!, result);
+        card.showResult(range, result);
       }
     );
   } catch (_) {
@@ -753,55 +720,20 @@ export function triggerSelectionLookup(): void {
   }
 }
 
-// 捕获阶段监听 mousedown：记录按下状态
-document.addEventListener(
-  'mousedown',
-  (e) => {
-    isPointerOrMouseDown = true;
-    const host = document.getElementById('translate-king-bubble-host');
-    if (host && host.contains(e.target as Node)) {
-      return;
-    }
-  },
-  true
-);
-
-// 捕获阶段监听 mouseup：在 React Native Web 阻止冒泡之前率先拦截
-document.addEventListener(
-  'mouseup',
-  (e) => {
-    isPointerOrMouseDown = false;
-    const host = document.getElementById('translate-king-bubble-host');
-    if (host && host.contains(e.target as Node)) {
-      return;
-    }
-    setTimeout(triggerSelectionLookup, 15);
-  },
-  true
-);
-
-// 捕获阶段监听 keyup：支持 Shift + 方向键键盘划词
-document.addEventListener(
-  'keyup',
-  (e) => {
-    if (e.key === 'Shift' || e.key.startsWith('Arrow')) {
-      setTimeout(triggerSelectionLookup, 15);
-    }
-  },
-  true
-);
-
-// 浏览器引擎原生 selectionchange 终极保底监听（任何前端库或框架均无法阻止此原生事件派发）
-document.addEventListener('selectionchange', () => {
-  if (isPointerOrMouseDown) {
+// 监听 mouseup 事件：延时 40ms 确保浏览器选区与双击动作完全稳定
+document.addEventListener('mouseup', (e) => {
+  const host = document.getElementById('translate-king-bubble-host');
+  if (host && host.contains(e.target as Node)) {
     return;
   }
-  if (selectionDebounceTimer) {
-    clearTimeout(selectionDebounceTimer);
+  setTimeout(triggerSelectionLookup, 40);
+});
+
+// 监听 keyup 事件：支持 Shift + 方向键键盘划词
+document.addEventListener('keyup', (e) => {
+  if (e.key === 'Shift' || e.key.startsWith('Arrow')) {
+    setTimeout(triggerSelectionLookup, 40);
   }
-  selectionDebounceTimer = setTimeout(() => {
-    triggerSelectionLookup();
-  }, 180);
 });
 
 // 监听来自扩展 Popup / Background 的指令

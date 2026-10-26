@@ -336,8 +336,14 @@ export function injectTranslation(
   // ========================================================
   // 模式 2：有英语基础 · 双语对照伴读模式 (英文在上，中文在下)
   // ========================================================
-  // 在双语模式下，对于尺寸狭小的操作按钮不强行挂载多行双语，避免界面布局错位
+  // 对于操作按钮，在双语模式下直接原地替换文本（避免在小按钮内塞入双行导致界面错位）
   if (isInteractiveButton(el)) {
+    if (!el.hasAttribute('data-tk-orig-text')) {
+      el.setAttribute('data-tk-orig-text', block.originalText);
+    }
+    el.textContent = translatedText;
+    el.setAttribute('data-tk-trans-text', translatedText);
+    el.setAttribute('data-tk-replaced', 'true');
     return;
   }
 
