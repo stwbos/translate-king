@@ -8,7 +8,7 @@
  *    - 鼠标移入字幕文字区域自动暂停视频，防止字幕溜走，从容查词
  *    - 鼠标移出且查词卡片关闭后自动恢复播放
  * 4. 原生事件穿透保护：外层容器 pointer-events: none 穿透到底层原生播放器，内层文字块支持高精度划词
- * 5. 自动隐藏 YouTube 原生遮挡字幕，避免双重叠字
+ * 5. 双重保险：支持 SubtitleScheduler 调度器驱动与实时 NativeCaptionObserver 驱动
  */
 
 import { SubtitleCue } from './types';
@@ -28,7 +28,7 @@ export class SubtitleOverlay {
   }
 
   /**
-   * 初始化挂载容器
+   * 初始化挂载容器 (幂等安全，可安全多次调用)
    */
   public init(): boolean {
     if (typeof document === 'undefined') return false;
@@ -40,8 +40,14 @@ export class SubtitleOverlay {
       return false;
     }
 
-    // 避免重复挂载
+    // 若已经挂载且仍在 playerElement 中，更新 videoElement 即可
     const existing = document.getElementById('translate-king-yt-overlay');
+    if (existing && this.playerElement.contains(existing) && this.textContainer) {
+      this.overlayContainer = existing;
+      this.injectStyles();
+      return true;
+    }
+
     if (existing) {
       existing.remove();
     }
@@ -66,22 +72,23 @@ export class SubtitleOverlay {
     box.appendChild(transText);
     overlay.appendChild(box);
 
-    // 3. 绑定悬停自动暂停机制
+    // 3. 绑定悬停自动暂停机制 (动态实时获取 video 元素)
     box.addEventListener('mouseenter', () => {
-      if (this.videoElement && !this.videoElement.paused) {
+      const video = this.videoElement || (document.querySelector('#movie_player video') as HTMLVideoElement | null);
+      if (video && !video.paused) {
         this.wasAutoPaused = true;
-        this.videoElement.pause();
+        video.pause();
       }
     });
 
     box.addEventListener('mouseleave', () => {
-      // 若当前划词词典浮窗正在展示，保持暂停供用户阅读；否则恢复播放
       const host = document.getElementById('translate-king-bubble-host');
       const isCardActive = host?.shadowRoot?.querySelector('.translate-king-card');
+      const video = this.videoElement || (document.querySelector('#movie_player video') as HTMLVideoElement | null);
 
-      if (!isCardActive && this.wasAutoPaused && this.videoElement) {
+      if (!isCardActive && this.wasAutoPaused && video) {
         this.wasAutoPaused = false;
-        this.videoElement.play().catch(() => {});
+        video.play().catch(() => {});
       }
     });
 
@@ -99,12 +106,12 @@ export class SubtitleOverlay {
   }
 
   /**
-   * 渲染或隐藏指定字幕
+   * 基于 SubtitleCue 渲染或隐藏字幕
    */
   public renderCue(cue: SubtitleCue | null): void {
     if (this.isDestroyed || !this.textContainer || !this.origTextEl || !this.transTextEl) return;
 
-    if (!cue) {
+    if (!cue || !cue.originalText || cue.originalText.trim() === '') {
       this.textContainer.style.display = 'none';
       return;
     }
@@ -112,8 +119,26 @@ export class SubtitleOverlay {
     this.origTextEl.textContent = cue.originalText;
     this.transTextEl.textContent = cue.translatedText || '';
 
-    // 若译文尚未返回，隐藏译文行仅展示原文；一旦译文就绪瞬间双行展现
+    // 若译文尚未返回，仅展示原文；一旦译文就绪瞬间双行展现
     this.transTextEl.style.display = cue.translatedText ? 'block' : 'none';
+    this.textContainer.style.display = 'inline-flex';
+  }
+
+  /**
+   * 基于实时文本直出渲染 (供 NativeCaptionObserver 使用)
+   */
+  public renderDirectText(originalText: string, translatedText: string): void {
+    if (this.isDestroyed || !this.textContainer || !this.origTextEl || !this.transTextEl) return;
+
+    const trimmed = originalText ? originalText.trim() : '';
+    if (!trimmed) {
+      this.textContainer.style.display = 'none';
+      return;
+    }
+
+    this.origTextEl.textContent = trimmed;
+    this.transTextEl.textContent = translatedText || '';
+    this.transTextEl.style.display = translatedText ? 'block' : 'none';
     this.textContainer.style.display = 'inline-flex';
   }
 
@@ -129,7 +154,7 @@ export class SubtitleOverlay {
     style.textContent = `
       #translate-king-yt-overlay {
         position: absolute !important;
-        bottom: 8% !important;
+        bottom: 56px !important;
         left: 0 !important;
         right: 0 !important;
         z-index: 60 !important;
@@ -141,13 +166,15 @@ export class SubtitleOverlay {
         transition: bottom 0.2s ease !important;
       }
 
-      /* 播放器控制栏激活时字幕稍微上浮，避免遮挡进度条 */
-      .ytp-autohide:not(.ytp-fullscreen) #translate-king-yt-overlay,
-      .ytp-hide-controls #translate-king-yt-overlay {
-        bottom: 6% !important;
+      /* 播放器控制栏激活与隐藏时智能浮动，绝不遮挡进度条 */
+      .ytp-autohide #translate-king-yt-overlay {
+        bottom: 32px !important;
       }
       .ytp-fullscreen #translate-king-yt-overlay {
-        bottom: 10% !important;
+        bottom: 80px !important;
+      }
+      .ytp-fullscreen.ytp-autohide #translate-king-yt-overlay {
+        bottom: 44px !important;
       }
 
       .translate-king-yt-box {
@@ -162,7 +189,7 @@ export class SubtitleOverlay {
         -webkit-backdrop-filter: blur(6px) !important;
         padding: 6px 18px !important;
         border-radius: 8px !important;
-        max-width: 82% !important;
+        max-width: 84% !important;
         text-align: center !important;
         box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45) !important;
         border: 1px solid rgba(255, 255, 255, 0.08) !important;
@@ -172,7 +199,7 @@ export class SubtitleOverlay {
         color: #E2E8F0 !important;
         font-size: clamp(14px, 1.8vw, 22px) !important;
         line-height: 1.35 !important;
-        opacity: 0.88 !important;
+        opacity: 0.9 !important;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
         text-shadow: 0 2px 4px rgba(0, 0, 0, 0.95), 0 0 2px #000 !important;
       }
@@ -187,11 +214,16 @@ export class SubtitleOverlay {
         text-shadow: 0 2px 4px rgba(0, 0, 0, 0.95), 0 0 2px #000 !important;
       }
 
-      /* 隐藏 YouTube 原生遮挡重叠字幕 */
+      /* 隐藏 YouTube 原生遮挡重叠字幕，但保留 DOM 渲染让 MutationObserver 持续捕获 */
       .ytp-caption-window-bottom,
       .caption-window {
-        opacity: 0 !important;
+        opacity: 0.001 !important;
         pointer-events: none !important;
+      }
+      .ytp-caption-segment {
+        opacity: 0 !important;
+        color: transparent !important;
+        text-shadow: none !important;
       }
     `;
 

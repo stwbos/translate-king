@@ -6,7 +6,9 @@ import {
   parseHumanCcSubtitles,
   selectBestEnglishTrack,
   normalizeTimedTextUrl,
-  extractCaptionTracksFromDom
+  extractCaptionTracksFromDom,
+  parseXmlToCues,
+  parseSubtitlePayload
 } from '../src/content/youtube/extractor';
 import { YouTubeCaptionTrack, TimedTextJson3Event } from '../src/content/youtube/types';
 
@@ -158,5 +160,42 @@ describe('YouTube 字幕嗅探与 ASR 断句重组 (YouTube Extractor & Sentence
     expect(tracks).not.toBeNull();
     expect(tracks).toHaveLength(1);
     expect(tracks![0].languageCode).toBe('en');
+  });
+
+  it('应当能正确解析 YouTube 经典 XML 格式字幕流 (parseXmlToCues)', () => {
+    const xml = `<?xml version="1.0" encoding="utf-8" ?>
+<transcript>
+  <text start="1.25" dur="2.5">Welcome back to &lt;b&gt;TranslateKing&lt;/b&gt; [Music]</text>
+  <text start="4.00" dur="3.1">It&#39;s an amazing experience.</text>
+</transcript>`;
+
+    const cues = parseXmlToCues(xml);
+    expect(cues).toHaveLength(2);
+    expect(cues[0].startMs).toBe(1250);
+    expect(cues[0].endMs).toBe(3750);
+    expect(cues[0].originalText).toBe('Welcome back to <b>TranslateKing</b>');
+    expect(cues[1].startMs).toBe(4000);
+    expect(cues[1].originalText).toBe("It's an amazing experience.");
+  });
+
+  it('统一解析器 (parseSubtitlePayload) 能自适应识别 JSON3 与 XML，且对 0 字节空串安全返回空数组', () => {
+    expect(parseSubtitlePayload('')).toEqual([]);
+    expect(parseSubtitlePayload('   ')).toEqual([]);
+
+    // JSON3 自动识别
+    const jsonStr = JSON.stringify({
+      events: [
+        { tStartMs: 500, dDurationMs: 1000, segs: [{ utf8: 'Hello world' }] }
+      ]
+    });
+    const fromJson = parseSubtitlePayload(jsonStr);
+    expect(fromJson).toHaveLength(1);
+    expect(fromJson[0].originalText).toBe('Hello world');
+
+    // XML 自动识别
+    const xmlStr = '<transcript><text start="2" dur="1">Greetings</text></transcript>';
+    const fromXml = parseSubtitlePayload(xmlStr);
+    expect(fromXml).toHaveLength(1);
+    expect(fromXml[0].originalText).toBe('Greetings');
   });
 });

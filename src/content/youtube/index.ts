@@ -3,33 +3,35 @@
  *
  * 核心联动流程：
  * 1. 域名守卫：仅在 youtube.com 下静默激活
- * 2. 四重字幕嗅探流水线 (Quad-Insurance Extraction Pipeline)：
- *    - 通道 1: 0ms 同步读取 document.scripts 内置 captionTracks (沙箱无关、秒级直出)
- *    - 通道 2: MAIN 世界 yt-bridge.js 通信广播
- *    - 通道 3: 原生 fetch 拦截截获带签名的 /api/timedtext 请求
- *    - 通道 4: 异步 HTML 容灾拉取解析
- * 3. 播放器右上角悬浮徽标 + 右下角控制条 [双语 ON] 按钮双重挂载，状态一目了然！
- * 4. 挂载 Sliding Window 调度器与 Overlay 渲染层，无缝实现毫秒级双语对齐与悬停自动暂停查词
+ * 2. 双重全冗余字幕获取架构 (Dual-Insurance Acquisition Architecture)：
+ *    - 主航道 (Sliding Window 预翻译): MAIN 世界深度拦截 XHR/Fetch 捕获合法 signed timedtext，
+ *      由 SubtitleScheduler 调度二分查找与提前 120 秒毫秒级滑动窗口预取。
+ *    - 坚盾兜底 (NativeCaptionObserver): 100% 免疫 Proof of Origin (pot) 防爬校验，
+ *      实时 DOM 监听 YouTube 原生 CC .ytp-caption-segment 并瞬时双语上屏。
+ * 3. 播放器右上角专属徽标 + 控制条 [双语 ON] 切换按钮双重挂载，自愈防丢。
+ * 4. 电影级排版与悬停自动暂停 (Hover-Pause)，从容查词与生词本联动。
  */
 
 import {
   selectBestEnglishTrack,
   fetchAndParseSubtitles,
-  parseJson3EventsToCues,
-  normalizeTimedTextUrl,
+  parseSubtitlePayload,
   extractCaptionTracksFromDom
 } from './extractor';
 import { SubtitleScheduler } from './scheduler';
 import { SubtitleOverlay } from './overlay';
+import { NativeCaptionObserver } from './native-observer';
 import { TargetLanguage } from '../../types';
 
 let scheduler: SubtitleScheduler | null = null;
 let overlay: SubtitleOverlay | null = null;
+let nativeObserver: NativeCaptionObserver | null = null;
 let currentVideoId: string | null = null;
 let currentTargetLang: TargetLanguage = 'zh-CN';
 let isSubtitlesEnabled = true;
 let timeupdateCleanup: (() => void) | null = null;
-let hasLoadedForCurrentVideo = false;
+let hasLoadedCues = false;
+let isLifecycleSetup = false;
 
 function isYouTube(): boolean {
   if (typeof window === 'undefined') return false;
@@ -63,7 +65,7 @@ function injectMainWorldBridge(): void {
 }
 
 /**
- * 在视频播放器右上角挂载专属状态徽标 (无论控制栏是否隐藏，悬停画面永远可见)
+ * 挂载或更新播放器右上角状态徽标
  */
 function injectPlayerBadge(statusText: string, statusType: 'active' | 'loading' | 'no-captions' | 'off' = 'loading'): void {
   const player = document.getElementById('movie_player');
@@ -97,11 +99,7 @@ function injectPlayerBadge(statusText: string, statusType: 'active' | 'loading' 
 
     badge.addEventListener('click', (e) => {
       e.stopPropagation();
-      isSubtitlesEnabled = !isSubtitlesEnabled;
-      updateAllControls();
-      if (!isSubtitlesEnabled && overlay) {
-        overlay.renderCue(null);
-      }
+      toggleSubtitles();
     });
 
     player.appendChild(badge);
@@ -163,11 +161,7 @@ function injectBottomControls(): void {
 
   btn.addEventListener('click', (e) => {
     e.stopPropagation();
-    isSubtitlesEnabled = !isSubtitlesEnabled;
-    updateAllControls();
-    if (!isSubtitlesEnabled && overlay) {
-      overlay.renderCue(null);
-    }
+    toggleSubtitles();
   });
 
   updateButtonVisual(btn);
@@ -195,9 +189,40 @@ function updateAllControls(): void {
   const btn = document.getElementById('translate-king-yt-control-btn');
   if (btn) updateButtonVisual(btn);
   injectPlayerBadge(
-    hasLoadedForCurrentVideo ? '双语字幕: ON' : '正在连接...',
-    hasLoadedForCurrentVideo ? 'active' : 'loading'
+    isSubtitlesEnabled
+      ? (hasLoadedCues ? '双语字幕: ON' : '正在同步...')
+      : '双语字幕: OFF',
+    isSubtitlesEnabled
+      ? (hasLoadedCues ? 'active' : 'loading')
+      : 'off'
   );
+}
+
+/**
+ * 切换字幕开关状态
+ */
+function toggleSubtitles(enabled?: boolean): void {
+  isSubtitlesEnabled = enabled !== undefined ? enabled : !isSubtitlesEnabled;
+  updateAllControls();
+
+  if (isSubtitlesEnabled) {
+    if (nativeObserver) {
+      nativeObserver.start();
+      nativeObserver.ensureNativeCcEnabled();
+    }
+    const video = document.querySelector('#movie_player video') as HTMLVideoElement | null;
+    if (video && scheduler && scheduler.hasCues()) {
+      scheduler.onTimeUpdate(video.currentTime * 1000);
+    }
+  } else {
+    if (overlay) {
+      overlay.renderCue(null);
+    }
+    if (nativeObserver) {
+      nativeObserver.stop();
+      nativeObserver.disableNativeCc();
+    }
+  }
 }
 
 /**
@@ -236,106 +261,123 @@ function bindVideoTimeListener(): void {
 }
 
 /**
+ * 确保播放器容器、Overlay、Badge、Bottom Controls 与 Native Observer 全部挂载就绪 (自愈无条件挂载)
+ */
+function ensurePlayerMounted(): boolean {
+  if (typeof document === 'undefined') return false;
+  const player = document.getElementById('movie_player');
+  if (!player) return false;
+
+  // 1. 确保字幕渲染器挂载
+  if (!overlay) {
+    overlay = new SubtitleOverlay();
+  }
+  overlay.init();
+
+  // 2. 确保右上角徽标挂载
+  injectPlayerBadge(
+    isSubtitlesEnabled
+      ? (hasLoadedCues ? '双语字幕: ON' : '正在连接...')
+      : '双语字幕: OFF',
+    isSubtitlesEnabled
+      ? (hasLoadedCues ? 'active' : 'loading')
+      : 'off'
+  );
+
+  // 3. 确保控制栏底部按钮挂载
+  injectBottomControls();
+
+  // 4. 确保 Native Caption Observer 启动并监听
+  if (!nativeObserver) {
+    nativeObserver = new NativeCaptionObserver(
+      currentTargetLang,
+      (orig, trans) => {
+        if (isSubtitlesEnabled && overlay && (!scheduler || !scheduler.hasCues())) {
+          overlay.renderDirectText(orig, trans);
+        }
+      },
+      () => Boolean(scheduler && scheduler.hasCues())
+    );
+  }
+
+  if (isSubtitlesEnabled) {
+    nativeObserver.start();
+    nativeObserver.ensureNativeCcEnabled();
+  }
+
+  // 5. 绑定时间轴监听
+  if (scheduler && scheduler.hasCues()) {
+    bindVideoTimeListener();
+  }
+
+  return true;
+}
+
+/**
+ * 载入高精度字幕段入调度器，接管滑动窗口翻译
+ */
+function loadCuesIntoScheduler(cues: any[]): void {
+  if (!cues || cues.length === 0) return;
+
+  hasLoadedCues = true;
+  console.log(`[TranslateKing YouTube] 成功载入全片字幕流，共 ${cues.length} 个句段`);
+
+  if (!scheduler) {
+    scheduler = new SubtitleScheduler(currentTargetLang);
+  }
+  if (!overlay) {
+    overlay = new SubtitleOverlay();
+  }
+  overlay.init();
+
+  scheduler.loadCues(cues, currentTargetLang);
+  scheduler.subscribe((cue) => {
+    if (isSubtitlesEnabled && overlay) {
+      overlay.renderCue(cue);
+    }
+  });
+
+  injectPlayerBadge('双语字幕: ON', 'active');
+  injectBottomControls();
+  bindVideoTimeListener();
+}
+
+/**
+ * 处理拦截到的原生 timedtext 完整载荷 (XML 或 JSON3)
+ */
+function handleInterceptedTimedText(payloadText: string, url = ''): void {
+  if (!isYouTube() || hasLoadedCues) return;
+
+  try {
+    const isAsr = url.includes('kind=asr') || url.includes('a.');
+    const cues = parseSubtitlePayload(payloadText, isAsr);
+    if (cues && cues.length > 0) {
+      loadCuesIntoScheduler(cues);
+    }
+  } catch (err) {
+    console.warn('[TranslateKing YouTube] 解析拦截 timedtext 载荷异常:', err);
+  }
+}
+
+/**
  * 处理成功捕获的字幕轨道列表
  */
 async function handleTracksReceived(tracks: any[]): Promise<void> {
-  if (!isYouTube()) return;
+  if (!isYouTube() || hasLoadedCues) return;
   const bestTrack = selectBestEnglishTrack(tracks);
   if (!bestTrack) {
-    console.log('[TranslateKing YouTube] 当前视频未检测到英文字幕轨道');
-    injectPlayerBadge('本视频暂无字幕', 'no-captions');
+    console.log('[TranslateKing YouTube] 当前视频未在轨道列表中检测到英文字幕');
     return;
   }
 
   try {
     const cues = await fetchAndParseSubtitles(bestTrack);
-    if (cues.length === 0) {
-      injectPlayerBadge('本视频暂无字幕', 'no-captions');
-      return;
-    }
-
-    hasLoadedForCurrentVideo = true;
-    console.log(`[TranslateKing YouTube] 字幕加载就绪，共 ${cues.length} 个双语句段`);
-
-    if (!scheduler) {
-      scheduler = new SubtitleScheduler(currentTargetLang);
-    }
-    if (!overlay) {
-      overlay = new SubtitleOverlay();
-    }
-
-    overlay.init();
-    scheduler.loadCues(cues, currentTargetLang);
-    scheduler.subscribe((cue) => {
-      if (isSubtitlesEnabled && overlay) {
-        overlay.renderCue(cue);
-      }
-    });
-
-    injectBottomControls();
-    injectPlayerBadge('双语字幕: ON', 'active');
-    bindVideoTimeListener();
-  } catch (err) {
-    console.warn('[TranslateKing YouTube] 解析字幕异常:', err);
-    injectPlayerBadge('字幕解析失败', 'no-captions');
-  }
-}
-
-/**
- * 处理原生播放器网络请求拦截到的 timedtext 地址
- */
-async function handleNativeTimedTextUrl(rawUrl: string): Promise<void> {
-  if (!isYouTube() || hasLoadedForCurrentVideo) return;
-
-  try {
-    const targetUrl = normalizeTimedTextUrl(rawUrl);
-    const response = await fetch(targetUrl);
-    if (!response.ok) return;
-
-    const data = await response.json();
-    const events = data.events || [];
-    const isAsr = rawUrl.includes('kind=asr') || rawUrl.includes('a.');
-    const cues = parseJson3EventsToCues(events, isAsr);
-
-    if (cues.length > 0) {
-      hasLoadedForCurrentVideo = true;
-      if (!scheduler) scheduler = new SubtitleScheduler(currentTargetLang);
-      if (!overlay) overlay = new SubtitleOverlay();
-      overlay.init();
-      scheduler.loadCues(cues, currentTargetLang);
-      scheduler.subscribe((cue) => {
-        if (isSubtitlesEnabled && overlay) overlay.renderCue(cue);
-      });
-      injectBottomControls();
-      injectPlayerBadge('双语字幕: ON', 'active');
-      bindVideoTimeListener();
+    if (cues && cues.length > 0) {
+      loadCuesIntoScheduler(cues);
     }
   } catch (_) {
-    // ignore
+    // 0 字节或 pot 校验时静默由 NativeObserver 与 XHR 拦截接管
   }
-}
-
-/**
- * 尝试通过页面内 HTML 容灾提取字幕
- */
-async function tryExtractFromPageFetch(videoId: string): Promise<boolean> {
-  try {
-    const res = await fetch(`https://www.youtube.com/watch?v=${videoId}`);
-    if (!res.ok) return false;
-    const html = await res.text();
-    const match = html.match(/"captionTracks":\s*(\[.+?\])/);
-    if (match) {
-      const cleaned = match[1].replace(/\\u0026/g, '&');
-      const tracks = JSON.parse(cleaned);
-      if (Array.isArray(tracks) && tracks.length > 0) {
-        await handleTracksReceived(tracks);
-        return true;
-      }
-    }
-  } catch (_) {
-    // ignore
-  }
-  return false;
 }
 
 /**
@@ -345,6 +387,10 @@ export async function initYouTubeSubtitles(targetLang: TargetLanguage = 'zh-CN')
   if (!isYouTube()) return;
 
   currentTargetLang = targetLang;
+  if (nativeObserver) {
+    nativeObserver.setTargetLang(targetLang);
+  }
+
   const videoId = getVideoIdFromUrl();
   if (!videoId) {
     if (overlay) overlay.renderCue(null);
@@ -354,48 +400,41 @@ export async function initYouTubeSubtitles(targetLang: TargetLanguage = 'zh-CN')
   // 切视频重置状态
   if (videoId !== currentVideoId) {
     currentVideoId = videoId;
-    hasLoadedForCurrentVideo = false;
-    if (overlay) overlay.renderCue(null);
+    hasLoadedCues = false;
+    if (scheduler) {
+      scheduler.destroy();
+      scheduler = null;
+    }
+    if (overlay) {
+      overlay.renderCue(null);
+    }
   }
 
-  // 1. 尝试通道 1: 0ms 同步从当前页面 DOM scripts 提取
-  const domTracks = extractCaptionTracksFromDom(document);
-  if (domTracks && domTracks.length > 0) {
-    await handleTracksReceived(domTracks);
-    return;
-  }
-
-  // 2. 动态注入 MAIN 世界通信桥
+  // 1. 动态注入 MAIN 世界通信桥
   injectMainWorldBridge();
-  injectPlayerBadge('正在加载字幕...', 'loading');
 
-  // 3. 轮询查找播放器并挂载 Overlay 与控制按钮
+  // 2. 无论网络请求状态如何，第一时间无条件挂载播放器 UI 控件与 Observer
+  ensurePlayerMounted();
+
+  // 3. 轮询巡检挂载（确保 SPA 异步渲染 controls 或 video 挂载时立即贴合）
   let attempts = 0;
-  const pollTimer = setInterval(async () => {
+  const pollTimer = setInterval(() => {
     attempts++;
-    const player = document.getElementById('movie_player');
-    if (player) {
-      if (!overlay) overlay = new SubtitleOverlay();
-      overlay.init();
-      injectBottomControls();
-      injectPlayerBadge(hasLoadedForCurrentVideo ? '双语字幕: ON' : '正在读取轨道...', hasLoadedForCurrentVideo ? 'active' : 'loading');
+    ensurePlayerMounted();
 
-      // 向 MAIN 世界主动索取当前视频字幕轨道
-      window.postMessage({ type: 'TK_REQUEST_YT_TRACKS' }, '*');
-    }
+    // 向 MAIN 世界主动索取当前视频字幕轨道
+    window.postMessage({ type: 'TK_REQUEST_YT_TRACKS' }, '*');
 
-    // 若超过 10 次 (2.5秒) 仍未就绪，启动通道 4: 直接抓取网页 HTML 容灾解析
-    if (!hasLoadedForCurrentVideo && attempts === 10) {
-      tryExtractFromPageFetch(videoId);
-    }
-
-    if (hasLoadedForCurrentVideo || attempts >= 40) {
+    if (hasLoadedCues || attempts >= 16) {
       clearInterval(pollTimer);
-      if (!hasLoadedForCurrentVideo && attempts >= 40) {
-        injectPlayerBadge('本视频暂无字幕', 'no-captions');
-      }
     }
   }, 250);
+
+  // 4. 同步尝试从当前页面 DOM scripts 读取字幕轨道
+  const domTracks = extractCaptionTracksFromDom(document);
+  if (domTracks && domTracks.length > 0) {
+    handleTracksReceived(domTracks);
+  }
 }
 
 /**
@@ -406,16 +445,19 @@ export function setupYouTubeLifecycle(targetLang: TargetLanguage = 'zh-CN'): voi
 
   currentTargetLang = targetLang;
 
+  if (isLifecycleSetup) {
+    initYouTubeSubtitles(currentTargetLang);
+    return;
+  }
+  isLifecycleSetup = true;
+
   // 1. 监听来自 MAIN 世界桥接脚本发出的广播
   window.addEventListener('message', (e) => {
-    if (e.data && e.data.type === 'TK_YT_CAPTIONS_READY') {
-      if (e.data.tracks) {
-        handleTracksReceived(e.data.tracks);
-      }
-    } else if (e.data && e.data.type === 'TK_YT_NATIVE_TIMEDTEXT_URL') {
-      if (e.data.url) {
-        handleNativeTimedTextUrl(e.data.url);
-      }
+    if (!e.data) return;
+    if (e.data.type === 'TK_YT_CAPTIONS_READY' && e.data.tracks) {
+      handleTracksReceived(e.data.tracks);
+    } else if (e.data.type === 'TK_YT_INTERCEPTED_TIMEDTEXT' && e.data.body) {
+      handleInterceptedTimedText(e.data.body, e.data.url);
     }
   });
 
@@ -427,21 +469,18 @@ export function setupYouTubeLifecycle(targetLang: TargetLanguage = 'zh-CN'): voi
     initYouTubeSubtitles(currentTargetLang);
   });
 
-  // 3. 传统 popstate 与初始加载保底
+  // 3. 传统 popstate 保底
   window.addEventListener('popstate', () => {
     initYouTubeSubtitles(currentTargetLang);
   });
 
-  // 4. 定时兜底巡检：防止 SPA 无刷新跳转漏判视频切换
+  // 4. 定时心跳巡检：保证 SPA 无刷新切换及控制栏重绘时控件永远存在
   setInterval(() => {
     const v = getVideoIdFromUrl();
     if (v && v !== currentVideoId) {
       initYouTubeSubtitles(currentTargetLang);
-    } else if (v && !hasLoadedForCurrentVideo && isSubtitlesEnabled) {
-      const domTracks = extractCaptionTracksFromDom(document);
-      if (domTracks && domTracks.length > 0) {
-        handleTracksReceived(domTracks);
-      }
+    } else if (v) {
+      ensurePlayerMounted();
     }
   }, 1000);
 

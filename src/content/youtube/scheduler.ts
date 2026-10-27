@@ -57,6 +57,20 @@ export class SubtitleScheduler {
   }
 
   /**
+   * 是否已载入有效字幕轨道
+   */
+  public hasCues(): boolean {
+    return this.cues.length > 0;
+  }
+
+  /**
+   * 获取当前字幕条目总数
+   */
+  public getCueCount(): number {
+    return this.cues.length;
+  }
+
+  /**
    * 注册字幕变动监听器（当时间推进或新译文返回时通知 Overlay 重新渲染）
    */
   public subscribe(listener: SubtitleChangeListener): () => void {

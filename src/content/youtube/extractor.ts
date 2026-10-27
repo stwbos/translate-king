@@ -172,6 +172,92 @@ export function parseHumanCcSubtitles(events: TimedTextJson3Event[]): SubtitleCu
 }
 
 /**
+ * YouTube XML 格式字幕解析器 (兼容 <transcript><text start="1.5" dur="2.0">...</text></transcript>)
+ */
+export function parseXmlToCues(xmlText: string): SubtitleCue[] {
+  if (!xmlText || typeof xmlText !== 'string') return [];
+  const cues: SubtitleCue[] = [];
+  let cueId = 1;
+
+  if (typeof DOMParser !== 'undefined') {
+    try {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(xmlText, 'text/xml');
+      const textNodes = doc.querySelectorAll('text');
+      if (textNodes.length > 0) {
+        textNodes.forEach((node) => {
+          const startSec = parseFloat(node.getAttribute('start') || '0');
+          const durSec = parseFloat(node.getAttribute('dur') || '1');
+          const rawText = node.textContent || '';
+          const cleaned = cleanRawText(rawText);
+          if (cleaned.length > 0) {
+            const startMs = Math.round(startSec * 1000);
+            const endMs = Math.round((startSec + durSec) * 1000);
+            cues.push({
+              id: cueId++,
+              startMs,
+              endMs: Math.max(endMs, startMs + 600),
+              originalText: cleaned
+            });
+          }
+        });
+        if (cues.length > 0) return cues;
+      }
+    } catch (_) {}
+  }
+
+  // 跨平台或 Node/JSDOM 测试环境正则保底解析
+  const textTagRegex = /<text\s+start="([\d.]+)"(?:\s+dur="([\d.]+)")?[^>]*>([\s\S]*?)<\/text>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = textTagRegex.exec(xmlText)) !== null) {
+    const startSec = parseFloat(match[1]);
+    const durSec = match[2] ? parseFloat(match[2]) : 1;
+    const rawText = match[3]
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'");
+    const cleaned = cleanRawText(rawText);
+    if (cleaned.length > 0) {
+      const startMs = Math.round(startSec * 1000);
+      const endMs = Math.round((startSec + durSec) * 1000);
+      cues.push({
+        id: cueId++,
+        startMs,
+        endMs: Math.max(endMs, startMs + 600),
+        originalText: cleaned
+      });
+    }
+  }
+
+  return cues;
+}
+
+/**
+ * 统一字幕负载解析器 (自适应解析 json3、json 或 xml 格式字幕流)
+ */
+export function parseSubtitlePayload(payload: string, isAsr = false): SubtitleCue[] {
+  if (!payload || typeof payload !== 'string') return [];
+  const trimmed = payload.trim();
+  if (trimmed.length === 0) return [];
+
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    try {
+      const data = JSON.parse(trimmed);
+      const events = data.events || (Array.isArray(data) ? data : []);
+      return parseJson3EventsToCues(events, isAsr);
+    } catch (_) {}
+  }
+
+  if (trimmed.startsWith('<') || trimmed.includes('<text')) {
+    return parseXmlToCues(trimmed);
+  }
+
+  return [];
+}
+
+/**
  * 统一字幕事件解析入口（自动区分人工字幕与 ASR 语音识别字幕）
  */
 export function parseJson3EventsToCues(
@@ -262,25 +348,33 @@ export function normalizeTimedTextUrl(rawBaseUrl: string): string {
 }
 
 /**
- * 远程拉取 json3 格式字幕并解析为标准 SubtitleCue 列表
+ * 远程拉取字幕并解析为标准 SubtitleCue 列表 (具备 0 字节防崩与 XML/JSON 双格式兼容)
  */
 export async function fetchAndParseSubtitles(
   track: YouTubeCaptionTrack
 ): Promise<SubtitleCue[]> {
-  const targetUrl = normalizeTimedTextUrl(track.baseUrl);
-  const response = await fetch(targetUrl, {
-    headers: {
-      Accept: 'application/json, text/plain, */*'
+  try {
+    const isAsr = track.kind === 'asr' || (track.vssId ? track.vssId.includes('a.') : false);
+    const targetUrl = normalizeTimedTextUrl(track.baseUrl);
+    const response = await fetch(targetUrl, {
+      headers: {
+        Accept: 'application/json, text/xml, */*'
+      }
+    });
+
+    if (!response.ok) {
+      return [];
     }
-  });
 
-  if (!response.ok) {
-    throw new Error(`YouTube TimedText 请求失败: HTTP ${response.status}`);
+    const text = await response.text();
+    if (!text || text.trim().length === 0) {
+      // YouTube 返回 0 字节（因缺少 pot 防爬校验），静默返回空，由 DOM Observer 和 XHR 拦截层无缝接管
+      return [];
+    }
+
+    return parseSubtitlePayload(text, isAsr);
+  } catch (err) {
+    console.warn('[TranslateKing YouTube] fetchAndParseSubtitles 异常 (安全降级):', err);
+    return [];
   }
-
-  const data = (await response.json()) as TimedTextJson3Response;
-  const events = data.events || [];
-  const isAsr = track.kind === 'asr' || track.vssId.includes('a.');
-
-  return parseJson3EventsToCues(events, isAsr);
 }
