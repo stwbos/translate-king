@@ -98,4 +98,12 @@ describe('YouTube 双语字幕渲染器 (SubtitleOverlay)', () => {
     box.dispatchEvent(new MouseEvent('mouseleave'));
     expect(videoEl.play).toHaveBeenCalledTimes(1);
   });
+
+  it('setActive 应当在启用时添加 translate-king-active-subs 类，在关闭时移除以还原原生字幕', () => {
+    overlay.setActive(true);
+    expect(playerEl.classList.contains('translate-king-active-subs')).toBe(true);
+
+    overlay.setActive(false);
+    expect(playerEl.classList.contains('translate-king-active-subs')).toBe(false);
+  });
 });

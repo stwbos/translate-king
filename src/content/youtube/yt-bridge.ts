@@ -5,8 +5,9 @@
  * 在 YouTube 页面的 MAIN 执行世界（与 YouTube 播放器同属相同 JS 上下文）运行：
  * 1. 穿透 Chrome MV3 隔离世界壁垒，直接调用 #movie_player.getPlayerResponse() 与 window.ytInitialPlayerResponse
  * 2. 深度拦截 XMLHttpRequest 与 Fetch，捕获播放器自身发出的带合法 pot、session、signature 的 /api/timedtext 字幕流
- * 3. 接收并响应 Content Script 的原生 CC 启停控制 (toggleSubtitlesOn / loadModule)
- * 4. 监听 yt-navigate-finish 并在视频切换时通过 window.postMessage 向 Content Script 广播合法字幕轨道与拦截内容
+ * 3. 监听 yt-navigate-finish 并在视频切换时通过 window.postMessage 向 Content Script 广播合法字幕轨道与拦截内容
+ *
+ * 注：严禁调用 player.loadModule('captions') 或在主循环中重复触发 toggle，防止破坏 YouTube 原生字幕状态机
  */
 
 (function () {
@@ -52,42 +53,11 @@
     return false;
   }
 
-  function enablePlayerCaptions(): void {
-    const player = document.getElementById('movie_player') as any;
-    if (player) {
-      try {
-        if (typeof player.loadModule === 'function') {
-          player.loadModule('captions');
-        }
-        if (typeof player.toggleSubtitlesOn === 'function') {
-          player.toggleSubtitlesOn();
-        } else if (typeof player.toggleSubtitles === 'function' && typeof player.isSubtitlesOn === 'function' && !player.isSubtitlesOn()) {
-          player.toggleSubtitles();
-        }
-      } catch (_) {}
-    }
-  }
-
-  function disablePlayerCaptions(): void {
-    const player = document.getElementById('movie_player') as any;
-    if (player) {
-      try {
-        if (typeof player.toggleSubtitles === 'function' && typeof player.isSubtitlesOn === 'function' && player.isSubtitlesOn()) {
-          player.toggleSubtitles();
-        }
-      } catch (_) {}
-    }
-  }
-
-  // 1. 监听来自 Content Script 的消息
+  // 1. 监听来自 Content Script 的主动索取请求
   window.addEventListener('message', (e) => {
     if (!e.data) return;
     if (e.data.type === 'TK_REQUEST_YT_TRACKS') {
       broadcastTracks();
-    } else if (e.data.type === 'TK_ENABLE_YT_CC') {
-      enablePlayerCaptions();
-    } else if (e.data.type === 'TK_DISABLE_YT_CC') {
-      disablePlayerCaptions();
     }
   });
 

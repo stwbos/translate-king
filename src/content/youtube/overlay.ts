@@ -8,7 +8,7 @@
  *    - 鼠标移入字幕文字区域自动暂停视频，防止字幕溜走，从容查词
  *    - 鼠标移出且查词卡片关闭后自动恢复播放
  * 4. 原生事件穿透保护：外层容器 pointer-events: none 穿透到底层原生播放器，内层文字块支持高精度划词
- * 5. 双重保险：支持 SubtitleScheduler 调度器驱动与实时 NativeCaptionObserver 驱动
+ * 5. 安全样式隔离：仅在 .translate-king-active-subs 类激活时隐藏原生字幕，未开启时 100% 完整保留 YouTube 原生字幕
  */
 
 import { SubtitleCue } from './types';
@@ -28,7 +28,7 @@ export class SubtitleOverlay {
   }
 
   /**
-   * 初始化挂载容器 (幂等安全，可安全多次调用)
+   * 初始化挂载容器 (幂等安全)
    */
   public init(): boolean {
     if (typeof document === 'undefined') return false;
@@ -40,7 +40,7 @@ export class SubtitleOverlay {
       return false;
     }
 
-    // 若已经挂载且仍在 playerElement 中，更新 videoElement 即可
+    // 若已经挂载且仍在 playerElement 中，更新引用即可
     const existing = document.getElementById('translate-king-yt-overlay');
     if (existing && this.playerElement.contains(existing) && this.textContainer) {
       this.overlayContainer = existing;
@@ -99,10 +99,25 @@ export class SubtitleOverlay {
     this.origTextEl = origText;
     this.transTextEl = transText;
 
-    // 注入全局防叠字幕样式
+    // 注入全局样式
     this.injectStyles();
 
     return true;
+  }
+
+  /**
+   * 激活或停用双语字幕渲染状态
+   */
+  public setActive(active: boolean): void {
+    const player = this.playerElement || document.getElementById('movie_player');
+    if (!player) return;
+
+    if (active) {
+      player.classList.add('translate-king-active-subs');
+    } else {
+      player.classList.remove('translate-king-active-subs');
+      this.renderDirectText('', '');
+    }
   }
 
   /**
@@ -143,7 +158,7 @@ export class SubtitleOverlay {
   }
 
   /**
-   * 注入字幕渲染 CSS 规则 (电影级黑边描边 + 响应式居中 + 隐藏原生重叠字幕)
+   * 注入字幕渲染 CSS 规则
    */
   private injectStyles(): void {
     const styleId = 'translate-king-yt-styles';
@@ -214,13 +229,13 @@ export class SubtitleOverlay {
         text-shadow: 0 2px 4px rgba(0, 0, 0, 0.95), 0 0 2px #000 !important;
       }
 
-      /* 隐藏 YouTube 原生遮挡重叠字幕，但保留 DOM 渲染让 MutationObserver 持续捕获 */
-      .ytp-caption-window-bottom,
-      .caption-window {
+      /* 只有当翻译王双语字幕开启并激活时，才透明隐藏 YouTube 原生字幕，防止重叠 */
+      .translate-king-active-subs .ytp-caption-window-bottom,
+      .translate-king-active-subs .caption-window {
         opacity: 0.001 !important;
         pointer-events: none !important;
       }
-      .ytp-caption-segment {
+      .translate-king-active-subs .ytp-caption-segment {
         opacity: 0 !important;
         color: transparent !important;
         text-shadow: none !important;

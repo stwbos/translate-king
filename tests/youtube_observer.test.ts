@@ -105,4 +105,35 @@ describe('YouTube 原生字幕 DOM 监听器 (NativeCaptionObserver)', () => {
     expect(updates[updates.length - 1]).toEqual({ orig: '', trans: '' });
     observer.stop();
   });
+
+  it('当视频播放并推进至下一句字幕时，Observer 应当连续更新并自动更换字幕', async () => {
+    const updates: Array<{ orig: string; trans: string }> = [];
+    const observer = new NativeCaptionObserver(
+      'zh-CN',
+      (orig, trans) => {
+        updates.push({ orig, trans });
+      },
+      () => false
+    );
+
+    observer.start();
+
+    // 句 1: Hello world
+    observer.inspectActiveCaptions();
+    expect(updates[0].orig).toBe('Hello world');
+
+    // 句 2: Next spoken sentence
+    captionWindow.innerHTML = '<span class="ytp-caption-segment">This is the next sentence</span>';
+    observer.inspectActiveCaptions();
+
+    // 应当即刻侦测到新句子并切换
+    expect(updates.some((u) => u.orig === 'This is the next sentence')).toBe(true);
+
+    // 句 3: Third sentence
+    captionWindow.innerHTML = '<span class="ytp-caption-segment">Third continuous subtitle</span>';
+    observer.inspectActiveCaptions();
+
+    expect(updates.some((u) => u.orig === 'Third continuous subtitle')).toBe(true);
+    observer.stop();
+  });
 });
