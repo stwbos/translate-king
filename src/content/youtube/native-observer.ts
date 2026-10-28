@@ -1,58 +1,47 @@
 /**
- * 翻译王 (TranslateKing) - YouTube 原生字幕 DOM 监听与实时捕获器 (Native Caption Observer)
+ * 翻译王 (TranslateKing) - YouTube 原生字幕实时注入与双语呈现引擎 (Native Caption Dual-Sub Injector)
  *
- * 核心机制：
- * 1. 100% 免疫 Proof of Origin (pot) 防爬校验：
- *    - YouTube 官方播放器自身具备完备的签名与凭证，原生 CC 渲染出的 .ytp-caption-segment 绝对合法且真实
- * 2. 高频 DOM + 定时器双驱动 (80ms 极速响应)：
- *    - 实时监听 .caption-window 与 .ytp-caption-segment 变化，捕获当下朗读的原始字幕，随视频播放瞬态流转
- * 3. 0ms 闪电上屏与极速译文回填：
- *    - 原文 0ms 直出，命中本地缓存即刻双语上屏，未命中时异步拉取译文回填
- * 4. 零侵入保护机制：
- *    - 仅在字幕未开启时单次安全唤醒原生字幕，绝不循环调用或破坏播放器内部状态机
+ * 核心设计原则：
+ * 1. 零破坏原生性：100% 保留 YouTube 原生字幕结构与样式，绝不使用 opacity: 0.001 隐藏原生文字！
+ * 2. 原位双语排版 (In-situ Dual Subtitles)：
+ *    - 紧随 YouTube 原生 .caption-visual-line 之后，原位插入 .translate-king-bilingual-line
+ *    - 完美继承 YouTube 播放器自适应字号缩放、窗口避让控制条、全屏响应等全部原生机制
+ * 3. 毫秒级流式推进：
+ *    - 视频播放时，随着讲话者每一次切换句子，译文秒级实时跟随更换，彻底杜绝“定格卡死”
+ * 4. 悬停智能暂停 (Hover-Pause)：
+ *    - 鼠标悬停在字幕区域自动暂停，移出自动恢复播放，从容划词查词
  */
 
 import { cleanRawText } from './extractor';
 import { TargetLanguage, TranslateBatchResponse } from '../../types';
 
-export type NativeCaptionCallback = (originalText: string, translatedText: string) => void;
-
 export class NativeCaptionObserver {
   private observer: MutationObserver | null = null;
   private playerElement: HTMLElement | null = null;
-  private lastText = '';
   private targetLang: TargetLanguage = 'zh-CN';
-  private onUpdate: NativeCaptionCallback;
-  private isSchedulerActive: () => boolean;
   private translationCache = new Map<string, string>();
   private pollInterval: ReturnType<typeof setInterval> | null = null;
   private isRunning = false;
+  private lastProcessedText = '';
+  private wasAutoPaused = false;
   private hasAutoEnabledCc = false;
 
-  constructor(
-    targetLang: TargetLanguage,
-    onUpdate: NativeCaptionCallback,
-    isSchedulerActive: () => boolean
-  ) {
+  constructor(targetLang: TargetLanguage = 'zh-CN') {
     this.targetLang = targetLang;
-    this.onUpdate = onUpdate;
-    this.isSchedulerActive = isSchedulerActive;
   }
 
   public setTargetLang(lang: TargetLanguage): void {
     this.targetLang = lang;
   }
 
-  /**
-   * 重置当前视频状态 (切视频时调用)
-   */
   public resetVideo(): void {
     this.hasAutoEnabledCc = false;
-    this.lastText = '';
+    this.lastProcessedText = '';
+    this.removeInjectedLines();
   }
 
   /**
-   * 启动原生字幕 DOM 监听
+   * 启动原生字幕监听与双语注入
    */
   public start(): void {
     if (typeof document === 'undefined') return;
@@ -63,13 +52,13 @@ export class NativeCaptionObserver {
       this.pollInterval = setInterval(() => {
         if (!this.isRunning) return;
         this.ensureObserverAttached();
-        this.inspectActiveCaptions();
+        this.processActiveCaptions();
       }, 80);
     }
   }
 
   /**
-   * 停止监听
+   * 停止监听并清理注入的译文行，100% 还原原生字幕
    */
   public stop(): void {
     this.isRunning = false;
@@ -82,11 +71,12 @@ export class NativeCaptionObserver {
       this.pollInterval = null;
     }
     this.playerElement = null;
-    this.lastText = '';
+    this.lastProcessedText = '';
+    this.removeInjectedLines();
   }
 
   /**
-   * 确保 MutationObserver 正确挂载到 #movie_player
+   * 确保 MutationObserver 挂载
    */
   private ensureObserverAttached(): void {
     const player = document.getElementById('movie_player');
@@ -102,7 +92,7 @@ export class NativeCaptionObserver {
     }
 
     this.observer = new MutationObserver(() => {
-      this.inspectActiveCaptions();
+      this.processActiveCaptions();
     });
 
     this.observer.observe(player, {
@@ -113,64 +103,144 @@ export class NativeCaptionObserver {
   }
 
   /**
-   * 嗅探当前页面上正在渲染的原生字幕文本并实时推进
+   * 扫描原生字幕并原位注入双语译文
    */
-  public inspectActiveCaptions(): void {
+  public processActiveCaptions(): void {
     if (!this.isRunning) return;
 
-    // 若 Sliding Window 调度器已成功接管全片高精度时间轴，本通道静默退让
-    if (this.isSchedulerActive()) {
+    const captionWindow = document.querySelector('.caption-window') as HTMLElement | null;
+    if (!captionWindow) {
+      this.lastProcessedText = '';
       return;
     }
 
-    let segments = document.querySelectorAll('#movie_player .ytp-caption-segment');
-    if (!segments || segments.length === 0) {
-      segments = document.querySelectorAll('.caption-window .captions-text, .caption-window');
-    }
+    // 绑定悬停自动暂停
+    this.bindHoverPause(captionWindow);
 
-    if (!segments || segments.length === 0) {
-      if (this.lastText !== '') {
-        this.lastText = '';
-        this.onUpdate('', '');
-      }
+    // 提取当前所有非译文的原生字幕段文本
+    const origSegments = Array.from(
+      captionWindow.querySelectorAll('.ytp-caption-segment:not(.translate-king-trans-text)')
+    );
+
+    if (origSegments.length === 0) {
+      this.lastProcessedText = '';
+      this.removeInjectedLines(captionWindow);
       return;
     }
 
-    const rawJoined = Array.from(segments)
-      .map((el) => el.textContent || '')
-      .join(' ');
+    const rawJoined = origSegments.map((el) => el.textContent || '').join(' ');
     const cleaned = cleanRawText(rawJoined);
 
     if (!cleaned) {
-      if (this.lastText !== '') {
-        this.lastText = '';
-        this.onUpdate('', '');
-      }
+      this.lastProcessedText = '';
+      this.removeInjectedLines(captionWindow);
       return;
     }
 
-    if (cleaned === this.lastText) {
+    // 检查是否已经为当前原文字幕注入过对应译文
+    const existingTransEl = captionWindow.querySelector('.translate-king-trans-text');
+    if (cleaned === this.lastProcessedText && existingTransEl && existingTransEl.textContent) {
       return;
     }
 
-    this.lastText = cleaned;
+    this.lastProcessedText = cleaned;
 
-    // 1. 命中缓存秒级双语上屏
+    // 1. 命中内存缓存：0ms 瞬间注入双语
     if (this.translationCache.has(cleaned)) {
-      this.onUpdate(cleaned, this.translationCache.get(cleaned)!);
+      this.injectTranslationLine(captionWindow, this.translationCache.get(cleaned)!);
       return;
     }
 
-    // 2. 原文瞬间直出，绝不让用户等待网络延迟
-    this.onUpdate(cleaned, '');
-
-    // 3. 异步拉取译文回填
+    // 2. 未命中缓存：异步拉取译文并回填
     this.translateSingleText(cleaned, this.targetLang).then((trans) => {
       if (trans && trans.trim().length > 0) {
         this.translationCache.set(cleaned, trans);
-        if (this.lastText === cleaned && !this.isSchedulerActive()) {
-          this.onUpdate(cleaned, trans);
+        // 关键守卫：确保译文返回时，屏幕上依然是这句原文！
+        if (this.lastProcessedText === cleaned && this.isRunning) {
+          const currentWindow = document.querySelector('.caption-window') as HTMLElement | null;
+          if (currentWindow) {
+            this.injectTranslationLine(currentWindow, trans);
+          }
         }
+      }
+    });
+  }
+
+  /**
+   * 原位挂载双语翻译行
+   */
+  private injectTranslationLine(captionWindow: HTMLElement, translatedText: string): void {
+    if (!translatedText || !translatedText.trim()) return;
+
+    // 优先寻找内部容器 .captions-text
+    const container = captionWindow.querySelector('.captions-text') || captionWindow;
+
+    let line = captionWindow.querySelector('.translate-king-bilingual-line') as HTMLElement | null;
+    let textSpan = line?.querySelector('.translate-king-trans-text') as HTMLElement | null;
+
+    if (!line) {
+      line = document.createElement('span');
+      line.className = 'caption-visual-line translate-king-bilingual-line';
+      line.setAttribute('translate', 'no');
+      line.style.cssText = `
+        display: block !important;
+        margin-top: 4px !important;
+        line-height: 1.35 !important;
+        user-select: text !important;
+        -webkit-user-select: text !important;
+      `;
+
+      textSpan = document.createElement('span');
+      textSpan.className = 'ytp-caption-segment translate-king-trans-text';
+      textSpan.style.cssText = `
+        color: #FEF08A !important;
+        font-weight: 600 !important;
+        font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif !important;
+        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.95), 0 0 3px #000 !important;
+        display: inline-block !important;
+        padding: 2px 4px !important;
+      `;
+
+      line.appendChild(textSpan);
+      container.appendChild(line);
+    }
+
+    if (textSpan) {
+      textSpan.textContent = translatedText;
+    }
+  }
+
+  /**
+   * 清除当前注入的双语译文行
+   */
+  private removeInjectedLines(scope: Document | HTMLElement = document): void {
+    const lines = scope.querySelectorAll('.translate-king-bilingual-line');
+    lines.forEach((el) => el.remove());
+  }
+
+  /**
+   * 绑定悬停自动暂停
+   */
+  private bindHoverPause(captionWindow: HTMLElement): void {
+    if ((captionWindow as any).__tk_hover_bound) return;
+    (captionWindow as any).__tk_hover_bound = true;
+
+    captionWindow.addEventListener('mouseenter', () => {
+      const video = document.querySelector('#movie_player video') as HTMLVideoElement | null;
+      if (video && !video.paused) {
+        this.wasAutoPaused = true;
+        video.pause();
+      }
+    });
+
+    captionWindow.addEventListener('mouseleave', () => {
+      const host = document.getElementById('translate-king-bubble-host');
+      const isCardActive = host?.shadowRoot?.querySelector('.translate-king-card');
+      const video = document.querySelector('#movie_player video') as HTMLVideoElement | null;
+
+      if (!isCardActive && this.wasAutoPaused && video) {
+        this.wasAutoPaused = false;
+        video.play().catch(() => {});
       }
     });
   }
@@ -202,7 +272,7 @@ export class NativeCaptionObserver {
   }
 
   /**
-   * 安全单次唤醒 YouTube 原生 CC 按钮 (绝不循环重复点击，绝不调用破坏性私有方法)
+   * 安全单次唤醒 YouTube 原生 CC 按钮 (未开启时开启一次，绝不循环重复点击)
    */
   public ensureNativeCcEnabled(): void {
     if (typeof document === 'undefined') return;
@@ -216,7 +286,6 @@ export class NativeCaptionObserver {
       return;
     }
 
-    // 仅在首次未开启时触发一次唤醒
     if (!this.hasAutoEnabledCc) {
       this.hasAutoEnabledCc = true;
       console.log('[TranslateKing YouTube] 触发原生字幕单次安全唤醒');

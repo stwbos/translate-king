@@ -284,15 +284,7 @@ function ensurePlayerMounted(): boolean {
 
   // 4. 确保 Native Caption Observer 启动并监听
   if (!nativeObserver) {
-    nativeObserver = new NativeCaptionObserver(
-      currentTargetLang,
-      (orig, trans) => {
-        if (isSubtitlesEnabled && overlay && (!scheduler || !scheduler.hasCues())) {
-          overlay.renderDirectText(orig, trans);
-        }
-      },
-      () => Boolean(scheduler && scheduler.hasCues())
-    );
+    nativeObserver = new NativeCaptionObserver(currentTargetLang);
   }
 
   if (isSubtitlesEnabled) {

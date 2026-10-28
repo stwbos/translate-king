@@ -228,18 +228,6 @@ export class SubtitleOverlay {
         font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif !important;
         text-shadow: 0 2px 4px rgba(0, 0, 0, 0.95), 0 0 2px #000 !important;
       }
-
-      /* 只有当翻译王双语字幕开启并激活时，才透明隐藏 YouTube 原生字幕，防止重叠 */
-      .translate-king-active-subs .ytp-caption-window-bottom,
-      .translate-king-active-subs .caption-window {
-        opacity: 0.001 !important;
-        pointer-events: none !important;
-      }
-      .translate-king-active-subs .ytp-caption-segment {
-        opacity: 0 !important;
-        color: transparent !important;
-        text-shadow: none !important;
-      }
     `;
 
     document.head.appendChild(style);
