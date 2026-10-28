@@ -79,7 +79,9 @@ export class NativeCaptionObserver {
    * 确保 MutationObserver 挂载
    */
   private ensureObserverAttached(): void {
-    const player = document.getElementById('movie_player');
+    const player = (document.getElementById('movie_player') ||
+      document.querySelector('.html5-video-player') ||
+      document.querySelector('ytd-player')) as HTMLElement | null;
     if (!player) return;
 
     if (this.playerElement === player && this.observer) {
@@ -194,11 +196,13 @@ export class NativeCaptionObserver {
       textSpan.className = 'ytp-caption-segment translate-king-trans-text';
       textSpan.style.cssText = `
         color: #FEF08A !important;
+        background: rgba(8, 8, 8, 0.75) !important;
         font-weight: 600 !important;
         font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif !important;
         text-shadow: 0 2px 4px rgba(0, 0, 0, 0.95), 0 0 3px #000 !important;
         display: inline-block !important;
-        padding: 2px 4px !important;
+        padding: 2px 6px !important;
+        border-radius: 2px !important;
       `;
 
       line.appendChild(textSpan);

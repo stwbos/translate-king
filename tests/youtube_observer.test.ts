@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { NativeCaptionObserver } from '../src/content/youtube/native-observer';
+import { ensurePlayerMounted } from '../src/content/youtube/index';
 
 describe('YouTube 原生字幕双语原位注入引擎 (NativeCaptionObserver)', () => {
   let player: HTMLElement;
@@ -134,5 +135,42 @@ describe('YouTube 原生字幕双语原位注入引擎 (NativeCaptionObserver)',
     observer.stop();
 
     expect(captionWindow.querySelector('.translate-king-bilingual-line')).toBeNull();
+  });
+
+  it('ensurePlayerMounted 应当将双语切换按钮精准注入到全屏按钮左侧，并具备高防御样式', () => {
+    // 构造播放器底栏控制区
+    const rightControls = document.createElement('div');
+    rightControls.className = 'ytp-right-controls';
+    rightControls.innerHTML = `
+      <button class="ytp-subtitles-button ytp-button" aria-pressed="false"></button>
+      <button class="ytp-settings-button ytp-button"></button>
+      <button class="ytp-fullscreen-button ytp-button"></button>
+    `;
+    player.appendChild(rightControls);
+
+    const success = ensurePlayerMounted();
+    expect(success).toBe(true);
+
+    const btn = document.getElementById('translate-king-yt-control-btn');
+    expect(btn).not.toBeNull();
+    expect(btn?.classList.contains('translate-king-yt-control-btn')).toBe(true);
+    expect(btn?.textContent).toContain('双语 ON');
+
+    // 必须位于全屏按键紧邻的左侧
+    const fullscreenBtn = rightControls.querySelector('.ytp-fullscreen-button');
+    expect(btn?.nextElementSibling).toBe(fullscreenBtn);
+
+    // 点击按钮切换为关闭状态
+    btn?.click();
+    expect(btn?.textContent).toContain('双语 OFF');
+
+    // 再次点击恢复为开启状态
+    btn?.click();
+    expect(btn?.textContent).toContain('双语 ON');
+
+    // 多次调用 ensurePlayerMounted 绝不产生重复按钮
+    ensurePlayerMounted();
+    const allBtns = document.querySelectorAll('#translate-king-yt-control-btn');
+    expect(allBtns.length).toBe(1);
   });
 });

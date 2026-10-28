@@ -43,6 +43,7 @@ if (typeof chrome !== 'undefined' && chrome.storage?.local) {
     }
     if (data.targetLang) {
       activeTargetLang = data.targetLang;
+      setupYouTubeLifecycle(activeTargetLang);
     }
     if (typeof data.enableSelection === 'boolean') {
       enableSelection = data.enableSelection;
@@ -73,10 +74,10 @@ if (typeof chrome !== 'undefined' && chrome.storage?.local) {
       }
     }
   });
-
-  // 启动 YouTube 实时双语字幕引擎监听
-  setupYouTubeLifecycle(activeTargetLang);
 }
+
+// 启动 YouTube 实时双语字幕引擎监听 (无条件顶层常驻)
+setupYouTubeLifecycle(activeTargetLang);
 
 /**
  * Content Script L0 极速内存缓存 (原文 -> 译文)
