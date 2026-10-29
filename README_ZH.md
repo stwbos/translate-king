@@ -17,7 +17,7 @@
 [![Vite 5](https://img.shields.io/badge/Built%20With-Vite%205-purple?logo=vite&logoColor=white)](https://vitejs.dev/)
 [![TypeScript 5](https://img.shields.io/badge/Language-TypeScript%205-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 
-**[简体中文主文档](README.md)** · **[English Documentation](README_EN.md)** · [技术架构白皮书](docs/TECHNICAL_SPEC.md) · [商店上架指南](docs/STORE_SUBMISSION_GUIDE.md) · [隐私政策](privacy.html)
+**[简体中文主文档](README.md)** · **[English Documentation](README_EN.md)** · [沉浸式翻译调研报告](docs/IMMERSIVE_TRANSLATE_RESEARCH_REPORT.md) · [Monica 竞品调研报告](docs/MONICA_BENCHMARK_RESEARCH_REPORT.md) · [技术架构白皮书](docs/TECHNICAL_SPEC.md) · [商店上架指南](docs/STORE_SUBMISSION_GUIDE.md) · [隐私政策](privacy.html)
 
 </div>
 

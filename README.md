@@ -13,7 +13,7 @@
 [![Vite 5](https://img.shields.io/badge/Built%20With-Vite%205-purple?logo=vite&logoColor=white)](https://vitejs.dev/)
 [![TypeScript 5](https://img.shields.io/badge/Language-TypeScript%205-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 
-**[简体中文文档](README.md)** · **[English Documentation](README_EN.md)** · [核心优势](#-为什么选择翻译王) · [阅读模式与主题](#-两大阅读模式与-6-款译文主题) · [YouTube 视频双语字幕与总结](#-youtube-视频双语字幕与全时长总结) · [划词精读与输入翻译](#-划词精读生词本与三击空格输入翻译) · [全屏设置中心](#️-全屏设置中心与多引擎接入) · [测试矩阵](#-全自动化测试矩阵-100-通过) · [快速体验](#-快速安装体验) · [隐私政策](privacy.html)
+**[简体中文文档](README.md)** · **[English Documentation](README_EN.md)** · [沉浸式翻译调研报告](docs/IMMERSIVE_TRANSLATE_RESEARCH_REPORT.md) · [Monica 竞品调研报告](docs/MONICA_BENCHMARK_RESEARCH_REPORT.md) · [技术白皮书](docs/TECHNICAL_SPEC.md) · [核心优势](#-为什么选择翻译王) · [阅读模式与主题](#-两大阅读模式与-6-款译文主题) · [YouTube 视频双语字幕与总结](#-youtube-视频双语字幕与全时长总结) · [测试矩阵](#-全自动化测试矩阵-100-通过) · [隐私政策](privacy.html)
 
 </div>
 
