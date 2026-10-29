@@ -157,12 +157,25 @@ export class NativeCaptionObserver {
     this.translateSingleText(cleaned, this.targetLang).then((trans) => {
       if (trans && trans.trim().length > 0) {
         this.translationCache.set(cleaned, trans);
-        // 关键守卫：确保译文返回时，屏幕上依然是这句原文！
-        if (this.lastProcessedText === cleaned && this.isRunning) {
-          const currentWindow = document.querySelector('.caption-window') as HTMLElement | null;
-          if (currentWindow) {
-            this.injectTranslationLine(currentWindow, trans);
-          }
+
+        if (!this.isRunning) return;
+
+        const currentWindow = document.querySelector('.caption-window') as HTMLElement | null;
+        if (!currentWindow) return;
+
+        const currentSegments = Array.from(
+          currentWindow.querySelectorAll('.ytp-caption-segment:not(.translate-king-trans-text)')
+        );
+        const currentJoined = cleanRawText(currentSegments.map((el) => el.textContent || '').join(' '));
+
+        // 流式字幕智能对齐：只要当前字幕包含已翻译片段或二者同属一个语境，立即上屏展现！
+        const isStillRelevant =
+          currentJoined === cleaned ||
+          currentJoined.includes(cleaned) ||
+          cleaned.includes(currentJoined);
+
+        if (isStillRelevant) {
+          this.injectTranslationLine(currentWindow, trans);
         }
       }
     });
@@ -173,9 +186,6 @@ export class NativeCaptionObserver {
    */
   private injectTranslationLine(captionWindow: HTMLElement, translatedText: string): void {
     if (!translatedText || !translatedText.trim()) return;
-
-    // 优先寻找内部容器 .captions-text
-    const container = captionWindow.querySelector('.captions-text') || captionWindow;
 
     let line = captionWindow.querySelector('.translate-king-bilingual-line') as HTMLElement | null;
     let textSpan = line?.querySelector('.translate-king-trans-text') as HTMLElement | null;
@@ -206,7 +216,7 @@ export class NativeCaptionObserver {
       `;
 
       line.appendChild(textSpan);
-      container.appendChild(line);
+      captionWindow.appendChild(line);
     }
 
     if (textSpan) {

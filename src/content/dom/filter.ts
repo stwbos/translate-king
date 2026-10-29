@@ -41,6 +41,23 @@ const NOISE_SELECTORS = [
   '[role="progressbar"]'
 ].join(',');
 
+// 视频播放器与字幕容器保护选择器：绝对禁止全网页 Alt+T 翻译误伤视频播放器与字幕流
+const PLAYER_SUBTITLE_SELECTORS = [
+  '#movie_player',
+  '.html5-video-player',
+  '.caption-window',
+  '.ytp-caption-window-bottom',
+  '.ytp-caption-segment',
+  '.captions-text',
+  '.ytp-chrome-bottom',
+  '.ytp-chrome-controls',
+  '.ytp-right-controls',
+  '.ytp-left-controls',
+  '.translate-king-bilingual-line',
+  '.translate-king-yt-control-btn',
+  'ytd-player'
+].join(',');
+
 /**
  * 校验元素是否真正处于翻译生效状态。
  * 若 React / Vue 等 SPA 框架在前端路由切换或组件重挂载时重置了子节点内容
@@ -170,6 +187,14 @@ export function shouldIgnoreElement(element: Element): boolean {
     return true;
   }
   if (typeof element.closest === 'function' && element.closest(NOISE_SELECTORS)) {
+    return true;
+  }
+
+  // 严格保护视频播放器及字幕容器，避免全网页 Alt+T 翻译破坏视频播放与原生字幕
+  if (typeof element.matches === 'function' && element.matches(PLAYER_SUBTITLE_SELECTORS)) {
+    return true;
+  }
+  if (typeof element.closest === 'function' && element.closest(PLAYER_SUBTITLE_SELECTORS)) {
     return true;
   }
 

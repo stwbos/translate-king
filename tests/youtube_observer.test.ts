@@ -173,4 +173,72 @@ describe('YouTube 原生字幕双语原位注入引擎 (NativeCaptionObserver)',
     const allBtns = document.querySelectorAll('#translate-king-yt-control-btn');
     expect(allBtns.length).toBe(1);
   });
+
+  it('ensurePlayerMounted 应当在视频下方主操作栏注入常驻的 [双语字幕 ON] 按钮并与底栏状态同步', () => {
+    // 构造视频下方操作栏
+    const topRow = document.createElement('div');
+    topRow.id = 'top-row';
+    topRow.innerHTML = `
+      <div id="actions">
+        <div id="actions-inner">
+          <div id="menu">
+            <button class="yt-like-btn">Like</button>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(topRow);
+
+    ensurePlayerMounted();
+
+    const actionBtn = document.getElementById('translate-king-yt-action-btn');
+    expect(actionBtn).not.toBeNull();
+    expect(actionBtn?.textContent).toContain('双语字幕 ON');
+
+    // 点击主操作栏按钮，底栏按钮与操作栏按钮同步切换为 OFF
+    actionBtn?.click();
+    expect(actionBtn?.textContent).toContain('双语字幕 OFF');
+
+    const bottomBtn = document.getElementById('translate-king-yt-control-btn');
+    if (bottomBtn) {
+      expect(bottomBtn.textContent).toContain('双语 OFF');
+    }
+
+    // 再次点击恢复为 ON
+    actionBtn?.click();
+    expect(actionBtn?.textContent).toContain('双语字幕 ON');
+    if (bottomBtn) {
+      expect(bottomBtn.textContent).toContain('双语 ON');
+    }
+  });
+
+  it('ASR 逐词流式识别追加新词时，译文应当自适应对齐并成功上屏，绝不因严格相等而丢弃', async () => {
+    const observer = new NativeCaptionObserver('zh-CN');
+    observer.start();
+
+    // 模拟 ASR 逐词涌入：初始句为 "Hello world"
+    const container = captionWindow.querySelector('.captions-text')!;
+    container.innerHTML = `
+      <span class="caption-visual-line">
+        <span class="ytp-caption-segment">Hello world</span>
+      </span>
+    `;
+    observer.processActiveCaptions();
+
+    // 在网络翻译返回前，ASR 紧接着追加了新词 "Hello world next sentence"
+    container.innerHTML = `
+      <span class="caption-visual-line">
+        <span class="ytp-caption-segment">Hello world next sentence</span>
+      </span>
+    `;
+
+    // 等待异步翻译返回并检验是否能自适应上屏
+    await new Promise((r) => setTimeout(r, 60));
+
+    const transEl = captionWindow.querySelector('.translate-king-trans-text');
+    expect(transEl).not.toBeNull();
+    expect(transEl?.textContent).toBe('你好世界');
+
+    observer.stop();
+  });
 });

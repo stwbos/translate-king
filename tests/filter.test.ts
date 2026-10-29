@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, it, expect } from 'vitest';
 import { shouldIgnoreElement, isValidTranslatableText } from '../src/content/dom/filter';
 
@@ -105,5 +106,20 @@ describe('DOM 智能过滤引擎 (Filter)', () => {
     expect(isValidTranslatableText('Show more')).toBe(true);
     expect(isValidTranslatableText('Hello world!')).toBe(true);
     expect(isValidTranslatableText('Artificial Intelligence')).toBe(true);
+  });
+
+  it('YouTube 播放器及原生字幕容器应当绝对被忽略，避免 Alt+T 全网页翻译误伤', () => {
+    const player = document.createElement('div');
+    player.id = 'movie_player';
+    const captionWindow = document.createElement('div');
+    captionWindow.className = 'caption-window ytp-caption-window-bottom';
+    const segment = document.createElement('span');
+    segment.className = 'ytp-caption-segment';
+    captionWindow.appendChild(segment);
+    player.appendChild(captionWindow);
+
+    expect(shouldIgnoreElement(player)).toBe(true);
+    expect(shouldIgnoreElement(captionWindow)).toBe(true);
+    expect(shouldIgnoreElement(segment)).toBe(true);
   });
 });
