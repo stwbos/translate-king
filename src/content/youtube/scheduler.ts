@@ -71,6 +71,13 @@ export class SubtitleScheduler {
   }
 
   /**
+   * 获取已载入的完整句子字幕列表
+   */
+  public getCues(): SubtitleCue[] {
+    return this.cues;
+  }
+
+  /**
    * 注册字幕变动监听器（当时间推进或新译文返回时通知 Overlay 重新渲染）
    */
   public subscribe(listener: SubtitleChangeListener): () => void {

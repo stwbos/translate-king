@@ -19,15 +19,16 @@ import {
 
 // ASR 停顿断句阈值：若两个词之间的空隙超过 450ms，视为说话人自然停顿断句
 const ASR_PAUSE_GAP_THRESHOLD_MS = 450;
-// 单句字幕最长展示时长：超过 5.5 秒强行断句，避免屏幕文字长时间不切换
-const MAX_CUE_DURATION_MS = 5500;
-// 单句最大单词量阈值：防止说话人不带标点连珠炮说话导致单句挤满三行
-const MAX_WORDS_PER_CUE = 18;
+// 单句字幕最长展示时长：超过 4.5 秒强行断句，避免屏幕文字过长
+const MAX_CUE_DURATION_MS = 4500;
+// 单句最大单词量阈值：控制在 14 词以内，确保视频画面内 1~2 行舒适排版绝不溢出
+const MAX_WORDS_PER_CUE = 14;
 
 interface RawWord {
   text: string;
   startMs: number;
   endMs: number;
+  rawEventEndMs?: number;
 }
 
 /**
@@ -85,12 +86,30 @@ export function mergeAsrSubtitles(events: TimedTextJson3Event[]): SubtitleCue[] 
       rawWords.push({
         text: rawWordText,
         startMs: wordStart,
-        endMs: wordEnd
+        endMs: wordEnd,
+        rawEventEndMs: Math.max(wordStart + 200, baseStart + eventDuration)
       });
     }
   }
 
   if (rawWords.length === 0) return [];
+
+  // 归一化跨 Event 的单词结束时间：
+  // YouTube ASR 的 dDurationMs 往往长达 5 秒（包含两行滚动悬停时间），会严重跨入下一个 Event 的起始时间，
+  // 导致时间轴重叠以及跨 Event 的自然停顿 (hasLongPause) 失效。此处按后续词起始时间严格裁剪！
+  for (let i = 0; i < rawWords.length - 1; i++) {
+    const cur = rawWords[i];
+    const nxt = rawWords[i + 1];
+    const gap = nxt.startMs - cur.startMs;
+    if (gap <= 0) {
+      cur.endMs = cur.startMs + 80;
+    } else if (gap >= 850) {
+      // 词间存在明显自然停顿，保留至少 500ms 空隙以触发 ASR_PAUSE_GAP_THRESHOLD_MS 断句
+      cur.endMs = Math.min(cur.rawEventEndMs ?? cur.endMs, Math.max(cur.startMs + 250, nxt.startMs - 500));
+    } else if (cur.endMs > nxt.startMs) {
+      cur.endMs = nxt.startMs;
+    }
+  }
 
   // 第二步：根据停顿间隔、标点符号、时长及词数阈值智能聚合重组整句
   const cues: SubtitleCue[] = [];
@@ -137,6 +156,14 @@ export function mergeAsrSubtitles(events: TimedTextJson3Event[]): SubtitleCue[] 
   }
 
   flushSentence();
+
+  // 第三步：确保相邻 Cue 时间戳严格递增不重叠，保证 SubtitleScheduler 二分查找 100% 稳定不闪烁
+  for (let i = 0; i < cues.length - 1; i++) {
+    if (cues[i].endMs > cues[i + 1].startMs) {
+      cues[i].endMs = Math.max(cues[i].startMs + 200, cues[i + 1].startMs - 1);
+    }
+  }
+
   return cues;
 }
 
@@ -172,9 +199,9 @@ export function parseHumanCcSubtitles(events: TimedTextJson3Event[]): SubtitleCu
 }
 
 /**
- * YouTube XML 格式字幕解析器 (兼容 <transcript><text start="1.5" dur="2.0">...</text></transcript>)
+ * YouTube XML 格式字幕解析器 (兼容 srv1 <transcript><text start="1.5" dur="2.0">...</text></transcript> 与 srv3 <timedtext><body><p t="1500" d="2000"><s>...</s></p></body></timedtext>)
  */
-export function parseXmlToCues(xmlText: string): SubtitleCue[] {
+export function parseXmlToCues(xmlText: string, isAsr = false): SubtitleCue[] {
   if (!xmlText || typeof xmlText !== 'string') return [];
   const cues: SubtitleCue[] = [];
   let cueId = 1;
@@ -183,6 +210,45 @@ export function parseXmlToCues(xmlText: string): SubtitleCue[] {
     try {
       const parser = new DOMParser();
       const doc = parser.parseFromString(xmlText, 'text/xml');
+
+      // 1. 优先尝试解析 YouTube 新版 srv3 XML 格式: <p t="1200" d="3500"><s t="150">word</s></p>
+      const pNodes = doc.querySelectorAll('p[t]');
+      if (pNodes.length > 0) {
+        const events: TimedTextJson3Event[] = [];
+        let hasWordOffsets = false;
+        pNodes.forEach((p) => {
+          const tStartMs = parseInt(p.getAttribute('t') || '0', 10);
+          const dDurationMs = parseInt(p.getAttribute('d') || '1500', 10);
+          const sNodes = p.querySelectorAll('s');
+          if (sNodes.length > 0) {
+            const segs: { utf8: string; tOffsetMs?: number }[] = [];
+            sNodes.forEach((s) => {
+              const tAttr = s.getAttribute('t');
+              const tOffsetMs = tAttr ? parseInt(tAttr, 10) : 0;
+              if (tOffsetMs > 0) hasWordOffsets = true;
+              segs.push({
+                utf8: s.textContent || '',
+                tOffsetMs
+              });
+            });
+            events.push({ tStartMs, dDurationMs, segs });
+          } else {
+            const raw = p.textContent || '';
+            if (raw.trim().length > 0) {
+              events.push({
+                tStartMs,
+                dDurationMs,
+                segs: [{ utf8: raw }]
+              });
+            }
+          }
+        });
+        if (events.length > 0) {
+          return parseJson3EventsToCues(events, isAsr || hasWordOffsets);
+        }
+      }
+
+      // 2. 解析传统 srv1 XML 格式: <text start="1.5" dur="2.0">...</text>
       const textNodes = doc.querySelectorAll('text');
       if (textNodes.length > 0) {
         textNodes.forEach((node) => {
@@ -206,7 +272,51 @@ export function parseXmlToCues(xmlText: string): SubtitleCue[] {
     } catch (_) {}
   }
 
-  // 跨平台或 Node/JSDOM 测试环境正则保底解析
+  // 跨平台或 Node/JSDOM 测试环境正则保底解析 (srv3 <p t="..." d="...">)
+  if (xmlText.includes('<p ') && xmlText.includes('t="')) {
+    const pTagRegex = /<p\s+[^>]*t="(\d+)"(?:\s+[^>]*d="(\d+)")?[^>]*>([\s\S]*?)<\/p>/gi;
+    const events: TimedTextJson3Event[] = [];
+    let hasWordOffsets = false;
+    let pMatch: RegExpExecArray | null;
+    while ((pMatch = pTagRegex.exec(xmlText)) !== null) {
+      const tStartMs = parseInt(pMatch[1], 10);
+      const dDurationMs = pMatch[2] ? parseInt(pMatch[2], 10) : 1500;
+      const inner = pMatch[3];
+      const sTagRegex = /<s(?:\s+[^>]*t="(\d+)")?[^>]*>([\s\S]*?)<\/s>/gi;
+      const segs: { utf8: string; tOffsetMs?: number }[] = [];
+      let sMatch: RegExpExecArray | null;
+      while ((sMatch = sTagRegex.exec(inner)) !== null) {
+        const tOffsetMs = sMatch[1] ? parseInt(sMatch[1], 10) : 0;
+        if (tOffsetMs > 0) hasWordOffsets = true;
+        const decoded = sMatch[2]
+          .replace(/&amp;/g, '&')
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>')
+          .replace(/&quot;/g, '"')
+          .replace(/&#39;/g, "'");
+        segs.push({ utf8: decoded, tOffsetMs });
+      }
+      if (segs.length > 0) {
+        events.push({ tStartMs, dDurationMs, segs });
+      } else {
+        const stripped = inner
+          .replace(/<[^>]+>/g, '')
+          .replace(/&amp;/g, '&')
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>')
+          .replace(/&quot;/g, '"')
+          .replace(/&#39;/g, "'");
+        if (stripped.trim().length > 0) {
+          events.push({ tStartMs, dDurationMs, segs: [{ utf8: stripped }] });
+        }
+      }
+    }
+    if (events.length > 0) {
+      return parseJson3EventsToCues(events, isAsr || hasWordOffsets);
+    }
+  }
+
+  // 跨平台或 Node/JSDOM 测试环境正则保底解析 (srv1 <text start="...">)
   const textTagRegex = /<text\s+start="([\d.]+)"(?:\s+dur="([\d.]+)")?[^>]*>([\s\S]*?)<\/text>/gi;
   let match: RegExpExecArray | null;
   while ((match = textTagRegex.exec(xmlText)) !== null) {
@@ -250,46 +360,75 @@ export function parseSubtitlePayload(payload: string, isAsr = false): SubtitleCu
     } catch (_) {}
   }
 
-  if (trimmed.startsWith('<') || trimmed.includes('<text')) {
-    return parseXmlToCues(trimmed);
+  if (trimmed.startsWith('<') || trimmed.includes('<text') || trimmed.includes('<p ')) {
+    return parseXmlToCues(trimmed, isAsr);
   }
 
   return [];
 }
 
 /**
- * 统一字幕事件解析入口（自动区分人工字幕与 ASR 语音识别字幕）
+ * 统一字幕事件解析入口（自动区分人工字幕与 ASR 语音识别逐词字幕）
  */
 export function parseJson3EventsToCues(
   events: TimedTextJson3Event[],
   isAsr = false
 ): SubtitleCue[] {
-  return isAsr ? mergeAsrSubtitles(events) : parseHumanCcSubtitles(events);
+  if (!events || events.length === 0) return [];
+  // 自动探测逐词偏移时间戳 (tOffsetMs > 0) 或 ASR 换行占位的特征，确保所有自动生成语音字幕 100% 聚合为完整长句
+  const detectedAsr =
+    isAsr ||
+    events.some(
+      (ev) =>
+        Array.isArray(ev.segs) &&
+        ev.segs.length > 1 &&
+        ev.segs.some((s) => typeof s.tOffsetMs === 'number' && s.tOffsetMs > 0)
+    );
+  return detectedAsr ? mergeAsrSubtitles(events) : parseHumanCcSubtitles(events);
 }
 
 /**
  * 直接从 DOM 中的页面脚本 (document.scripts) 中同步提取 captionTracks
- * 突破 Chrome MV3 沙箱限制与播放器初始化延迟，0 毫秒同步命中！
+ * 支持传入 expectedVideoId 校验，严防 YouTube SPA 切换视频后误读首个视频残留在 <script> 中的旧字幕轨道！
  */
-export function extractCaptionTracksFromDom(doc: Document = document): YouTubeCaptionTrack[] | null {
+export function extractCaptionTracksFromDom(
+  doc: Document = document,
+  expectedVideoId?: string | null
+): YouTubeCaptionTrack[] | null {
   if (!doc || !doc.scripts) return null;
+
+  const matchesExpectedVideo = (tracks: YouTubeCaptionTrack[]): boolean => {
+    if (!expectedVideoId) return true;
+    for (const t of tracks) {
+      if (t && typeof t.baseUrl === 'string') {
+        const m = t.baseUrl.match(/[?&]v=([a-zA-Z0-9_-]+)/);
+        if (m && m[1] && m[1] !== expectedVideoId) {
+          return false;
+        }
+      }
+    }
+    return true;
+  };
 
   for (let i = 0; i < doc.scripts.length; i++) {
     const s = doc.scripts[i];
     const text = s.textContent || '';
     if (text.includes('"captionTracks":')) {
-      const match = text.match(/"captionTracks":\s*(\[.+?\])/);
+      if (expectedVideoId && text.includes('"videoId":') && !new RegExp(`"videoId"\\s*:\\s*"${expectedVideoId}"`).test(text)) {
+        continue;
+      }
+      const match = text.match(/"captionTracks":\s*(\[[\s\S]+?\])/);
       if (match) {
         try {
           const cleaned = match[1].replace(/\\u0026/g, '&');
           const tracks = JSON.parse(cleaned);
-          if (Array.isArray(tracks) && tracks.length > 0) {
+          if (Array.isArray(tracks) && tracks.length > 0 && matchesExpectedVideo(tracks)) {
             return tracks;
           }
         } catch (_) {
           try {
             const tracks = JSON.parse(match[1]);
-            if (Array.isArray(tracks) && tracks.length > 0) {
+            if (Array.isArray(tracks) && tracks.length > 0 && matchesExpectedVideo(tracks)) {
               return tracks;
             }
           } catch (_) {}

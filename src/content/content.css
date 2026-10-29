@@ -22,6 +22,16 @@
   border-radius: 4px !important;
   border-left: 3px solid #3b82f6 !important;
   word-break: break-word !important;
+  white-space: pre-line !important;
+}
+
+/* 纯译文替换模式下：对包含多行换行的评论/段落强制保留原始换行与空行排版 */
+[data-tk-multiline="true"] {
+  white-space: pre-line !important;
+}
+
+br[data-tk-hidden-br="true"] {
+  display: none !important;
 }
 
 /* 社交平台（X / Twitter / Bluesky / Reddit）专属深度排版适配 */

@@ -108,13 +108,28 @@ chrome.commands.onCommand.addListener(async (command) => {
   }
 });
 
-// 初始化右键菜单
+// 初始化右键菜单并自动为已打开的标签页注入最新脚本（免刷新自愈）
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({
     id: 'translate-king-toggle',
     title: '翻译王：双语对照翻译此页面 (Alt+T)',
     contexts: ['page']
   });
+
+  if (chrome.tabs && chrome.scripting) {
+    chrome.tabs.query({ url: ['https://*.youtube.com/*', 'http://*.youtube.com/*'] }, (tabs) => {
+      if (chrome.runtime.lastError || !tabs) return;
+      for (const tab of tabs) {
+        if (!tab.id) continue;
+        const tabId = tab.id;
+        chrome.scripting.insertCSS({ target: { tabId }, files: ['content.css'] }).catch(() => {});
+        chrome.scripting
+          .executeScript({ target: { tabId }, files: ['yt-bridge.js'], world: 'MAIN' as any })
+          .catch(() => {});
+        chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] }).catch(() => {});
+      }
+    });
+  }
 });
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {

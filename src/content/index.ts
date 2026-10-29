@@ -19,6 +19,13 @@ import { SelectionFloatingCard } from './selection/floating-card';
 import { TargetLanguage, TranslationMode, RuntimeMessage, TranslateBatchResponse } from '../types';
 import { WordLookupResult } from '../background/dictionary';
 import { setupYouTubeLifecycle } from './youtube';
+import { setupInteractiveShortcuts } from './input-translate';
+import {
+  setupFloatingBall,
+  refreshFloatingBallVisual,
+  applyWebTranslationTheme,
+  WebTranslationTheme
+} from './floating-ball';
 
 /**
  * 校验扩展上下文生命周期状态（避免扩展被开发者刷新后旧标签页 Content Script 失效报红）
@@ -33,22 +40,87 @@ let routeChangeQueued = false;
 let currentSessionEpoch = 0;
 let activeTargetLang: TargetLanguage = 'zh-CN';
 let activeTranslationMode: TranslationMode = 'bilingual';
+let activeWebTheme: WebTranslationTheme = 'default';
+let autoTranslateList: string[] = [];
+let enableFloatingBall = true;
 let enableSelection = true;
 
-// 初始化读取用户偏好配置（翻译显示模式、目标语言、鼠标划词开关）
-if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-  chrome.storage.local.get(['translationMode', 'targetLang', 'enableSelection'], (data) => {
-    if (data.translationMode) {
-      activeTranslationMode = data.translationMode;
-    }
-    if (data.targetLang) {
-      activeTargetLang = data.targetLang;
-      setupYouTubeLifecycle(activeTargetLang);
-    }
-    if (typeof data.enableSelection === 'boolean') {
-      enableSelection = data.enableSelection;
-    }
+function mountOrUpdateFloatingBall(): void {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return;
+  setupFloatingBall({
+    onToggleTranslate: () => togglePageTranslation(activeTargetLang, activeTranslationMode),
+    onChangeMode: (mode) => {
+      activeTranslationMode = mode;
+      if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+        chrome.storage.local.set({ translationMode: mode });
+      }
+      if (isPageTranslated) {
+        clearAllTranslations(document);
+        translateFullPage(activeTargetLang, activeTranslationMode, true);
+      }
+    },
+    onChangeTheme: (theme) => {
+      activeWebTheme = theme;
+      applyWebTranslationTheme(theme);
+      if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+        chrome.storage.local.set({ webTheme: theme });
+      }
+    },
+    onToggleAutoSite: (hostname, enabled) => {
+      if (enabled) {
+        if (!autoTranslateList.includes(hostname)) autoTranslateList.push(hostname);
+        if (!isPageTranslated) {
+          translateFullPage(activeTargetLang, activeTranslationMode, true);
+        }
+      } else {
+        autoTranslateList = autoTranslateList.filter((h) => h !== hostname);
+      }
+      if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+        chrome.storage.local.set({ autoTranslateList });
+      }
+    },
+    getState: () => ({
+      isTranslated: isPageTranslated,
+      mode: activeTranslationMode,
+      theme: activeWebTheme,
+      isAutoSite: autoTranslateList.includes(window.location.hostname || ''),
+      enabled: enableFloatingBall
+    })
   });
+}
+
+// 初始化读取用户偏好配置（翻译显示模式、目标语言、鼠标划词开关、悬浮球与自动翻译白名单）
+if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+  chrome.storage.local.get(
+    ['translationMode', 'targetLang', 'enableSelection', 'webTheme', 'autoTranslateList', 'enableFloatingBall'],
+    (data) => {
+      if (data.translationMode) {
+        activeTranslationMode = data.translationMode;
+      }
+      if (data.targetLang) {
+        activeTargetLang = data.targetLang;
+        setupYouTubeLifecycle(activeTargetLang);
+      }
+      if (typeof data.enableSelection === 'boolean') {
+        enableSelection = data.enableSelection;
+      }
+      if (data.webTheme) {
+        activeWebTheme = data.webTheme;
+        applyWebTranslationTheme(activeWebTheme);
+      }
+      if (Array.isArray(data.autoTranslateList)) {
+        autoTranslateList = data.autoTranslateList;
+        const host = typeof window !== 'undefined' ? window.location.hostname : '';
+        if (host && autoTranslateList.includes(host) && !isPageTranslated) {
+          setTimeout(() => translateFullPage(activeTargetLang, activeTranslationMode, true), 150);
+        }
+      }
+      if (typeof data.enableFloatingBall === 'boolean') {
+        enableFloatingBall = data.enableFloatingBall;
+      }
+      mountOrUpdateFloatingBall();
+    }
+  );
 
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area === 'local') {
@@ -72,12 +144,32 @@ if (typeof chrome !== 'undefined' && chrome.storage?.local) {
       if (changes.enableSelection) {
         enableSelection = changes.enableSelection.newValue !== false;
       }
+      if (changes.webTheme) {
+        activeWebTheme = changes.webTheme.newValue || 'default';
+        applyWebTranslationTheme(activeWebTheme);
+      }
+      if (changes.enableFloatingBall) {
+        enableFloatingBall = changes.enableFloatingBall.newValue !== false;
+        mountOrUpdateFloatingBall();
+      }
     }
   });
 }
 
+// 启动右侧快捷悬浮球
+if (typeof document !== 'undefined') {
+  if (document.body) {
+    mountOrUpdateFloatingBall();
+  } else {
+    window.addEventListener('DOMContentLoaded', () => mountOrUpdateFloatingBall());
+  }
+}
+
 // 启动 YouTube 实时双语字幕引擎监听 (无条件顶层常驻)
 setupYouTubeLifecycle(activeTargetLang);
+
+// 启动连按 3 次空格输入框翻译 & 按住 Alt 鼠标悬停单段即时翻译
+setupInteractiveShortcuts(() => activeTargetLang);
 
 /**
  * Content Script L0 极速内存缓存 (原文 -> 译文)
@@ -224,16 +316,18 @@ async function translateAndMountBlocks(
     if (response && response.translations) {
       blocks.forEach((block, idx) => {
         const trans = response.translations[idx];
-        if (trans && trans.trim() !== '' && trans.trim() !== block.originalText.trim()) {
+        const cleanTrans = trans ? trans.replace(/<\/?x\d+[^>]*>/gi, '').trim() : '';
+        const cleanOrig = block.originalText.replace(/<\/?x\d+[^>]*>/gi, '').trim();
+        if (trans && cleanTrans !== '' && cleanTrans !== cleanOrig) {
           localTranslationCache.set(block.originalText.trim(), trans);
           injectTranslation(block, trans, activeTranslationMode);
         } else {
-          // 哪怕无需翻译或专有名词，也立即彻底移除动效，停止一切闪烁
-          block.element.classList.remove('translate-king-replacing-pulse');
+          // 若无需翻译、专有名词、或译文与原文一致，必须彻底移除 Loading 占位框与脉冲动效！
+          removeTranslation(block.element);
         }
       });
     } else {
-      blocks.forEach((block) => block.element.classList.remove('translate-king-replacing-pulse'));
+      blocks.forEach((block) => removeTranslation(block.element));
     }
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
@@ -242,7 +336,7 @@ async function translateAndMountBlocks(
       return;
     }
     console.error('[TranslateKing] 批次翻译错误:', err);
-    blocks.forEach((block) => block.element.classList.remove('translate-king-replacing-pulse'));
+    blocks.forEach((block) => removeTranslation(block.element));
   }
 }
 
@@ -281,12 +375,16 @@ function processDynamicMutations(delay = 40): void {
     isProcessingMutations = true;
     processingMutationsStartTime = Date.now();
     try {
-      const newBlocks = extractTranslatableBlocks(document);
+      const newBlocks = extractTranslatableBlocks(document, activeTargetLang);
       if (newBlocks.length > 0) {
         // 1. 同步探测 L0 缓存：回收重挂载的推文/聊天记录 0ms 瞬间秒出，绝不闪烁 Loading
         const { uncachedBlocks } = partitionByL0Cache(newBlocks);
 
         if (uncachedBlocks.length > 0) {
+          // 立即为所有待翻译块加盖队列锁，防止异步等待期间被 MutationObserver 二次重复扫描拆碎子节点！
+          const nowStr = String(Date.now());
+          uncachedBlocks.forEach((b) => b.element.setAttribute('data-tk-loading', nowStr));
+
           // 2. 扩大探测范围至 1200px（超前预读视野）
           const { visibleBlocks, offscreenBlocks } = partitionBlocksByViewport(uncachedBlocks, 1200);
 
@@ -349,7 +447,9 @@ function startDynamicObserver(): void {
           if (
             el.classList?.contains('translate-king-wrapper') ||
             el.id === 'translate-king-bubble-host' ||
-            el.id === 'translate-king-root'
+            el.id === 'translate-king-root' ||
+            el.id?.startsWith('translate-king-') ||
+            el.getAttribute?.('data-tk-ignore') === 'true'
           ) {
             continue;
           }
@@ -434,7 +534,7 @@ async function translateFullPage(
     activeTargetLang = targetLang;
     activeTranslationMode = mode;
 
-    const blocks = extractTranslatableBlocks(document);
+    const blocks = extractTranslatableBlocks(document, activeTargetLang);
     if (blocks.length === 0) {
       console.log('[TranslateKing] 当前页面未检测到有效待翻译文本，已挂载动态监听');
       isPageTranslated = true;
@@ -445,6 +545,10 @@ async function translateFullPage(
 
     // 1. 同步探测 L0 缓存：已有的直接秒级静默恢复
     const { uncachedBlocks } = partitionByL0Cache(blocks);
+
+    // 立即为所有待翻译块加盖队列锁，杜绝首屏请求期间 offscreen 块被 MutationObserver 重复提取或拆碎内联子节点
+    const nowStr = String(Date.now());
+    uncachedBlocks.forEach((b) => b.element.setAttribute('data-tk-loading', nowStr));
 
     // 2. 智能划分两级优先级队列：视口当前可见 vs 屏外待见段落 (预读缓冲设为 400px)
     const { visibleBlocks, offscreenBlocks } = partitionBlocksByViewport(uncachedBlocks, 400);
@@ -547,6 +651,7 @@ export function togglePageTranslation(
     isTranslating = false; // 强制解除任何陈旧挂起锁
     translateFullPage(targetLang, mode, true);
   }
+  setTimeout(refreshFloatingBallVisual, 50);
 }
 
 // -----------------------------------------------------------------

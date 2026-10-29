@@ -8,6 +8,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         popup: resolve(__dirname, 'popup.html'),
+        options: resolve(__dirname, 'options.html'),
         background: resolve(__dirname, 'src/background/index.ts'),
         content: resolve(__dirname, 'src/content/index.ts'),
         'yt-bridge': resolve(__dirname, 'src/content/youtube/yt-bridge.ts'),
@@ -27,6 +28,9 @@ export default defineConfig({
           }
           if (assetInfo.name === 'popup.css') {
             return 'popup.css';
+          }
+          if (assetInfo.name === 'options.css') {
+            return 'options.css';
           }
           return 'assets/[name].[ext]';
         }

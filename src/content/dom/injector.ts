@@ -6,6 +6,7 @@ import { TranslatableBlock } from './extractor';
 import { TranslationMode } from '../../types';
 
 const SHOW_TEXT_FILTER = typeof NodeFilter !== 'undefined' ? NodeFilter.SHOW_TEXT : 4;
+const savedOriginalNodesMap = new WeakMap<HTMLElement, Node[]>();
 
 /**
  * 安全定位承载有效非空文本的主 TextNode 节点（过滤纯空白字符节点）
@@ -27,16 +28,22 @@ function findPrimaryTextNode(root: Node, doc: Document): Text | null {
 }
 
 /**
- * 递归收集所有非空文本节点（用于精准替换多 span 拼接的段落/Bio）
+ * 递归收集主文本节点及所有后续文本节点（含多 span 之间的 \n 换行节点，确保替换与还原 100% 对齐）
  */
-function findAllNonEmptyTextNodes(root: Node, doc: Document): Text[] {
+function collectManagedTextNodes(root: Node, doc: Document): Text[] {
   if (typeof doc.createTreeWalker !== 'function') return [];
   const nodes: Text[] = [];
+  let foundPrimary = false;
   try {
     const walker = doc.createTreeWalker(root, SHOW_TEXT_FILTER);
     let current: Text | null = null;
     while ((current = walker.nextNode() as Text | null)) {
-      if (current.nodeValue && current.nodeValue.trim().length > 0) {
+      if (!foundPrimary) {
+        if (current.nodeValue && current.nodeValue.trim().length > 0) {
+          foundPrimary = true;
+          nodes.push(current);
+        }
+      } else {
         nodes.push(current);
       }
     }
@@ -70,28 +77,44 @@ export function removeTranslation(element: HTMLElement): void {
   const existing = element.querySelectorAll('.translate-king-wrapper');
   existing.forEach((node) => node.remove());
 
-  // 2. 移除替换模式动效类
+  // 2. 移除替换模式动效类与状态标记
   element.classList.remove('translate-king-replacing-pulse');
+  element.removeAttribute('data-tk-loading');
+  element.removeAttribute('data-tk-translated');
+  element.removeAttribute('data-tk-multiline');
+  if (typeof element.querySelectorAll === 'function') {
+    element.querySelectorAll('br[data-tk-hidden-br]').forEach((br) => br.removeAttribute('data-tk-hidden-br'));
+  }
 
-  // 3. 恢复直接替换模式的原始文本
-  if (element.hasAttribute('data-tk-orig-html')) {
-    element.innerHTML = element.getAttribute('data-tk-orig-html') || '';
+  // 3. 恢复直接替换模式的原始文本（优先使用内存 DOM 节点快照，兼容 YouTube Trusted Types）
+  if (savedOriginalNodesMap.has(element)) {
+    const savedNodes = savedOriginalNodesMap.get(element)!;
+    while (element.firstChild) {
+      element.removeChild(element.firstChild);
+    }
+    savedNodes.forEach((n) => element.appendChild(n.cloneNode(true)));
+    savedOriginalNodesMap.delete(element);
     element.removeAttribute('data-tk-orig-html');
+    element.removeAttribute('data-tk-orig-text');
+  } else if (element.hasAttribute('data-tk-orig-html')) {
+    try {
+      element.innerHTML = element.getAttribute('data-tk-orig-html') || '';
+    } catch {
+      const origText = element.getAttribute('data-tk-orig-text');
+      if (origText !== null) element.textContent = origText;
+    }
+    element.removeAttribute('data-tk-orig-html');
+    element.removeAttribute('data-tk-orig-text');
   } else if (element.hasAttribute('data-tk-orig-text')) {
     const orig = element.getAttribute('data-tk-orig-text');
     if (orig !== null) {
       const doc = element.ownerDocument || (typeof document !== 'undefined' ? document : null);
       if (doc) {
+        const allTextNodes = collectManagedTextNodes(element, doc);
         // 先还原后续多 span 的 extraText
         if (element.hasAttribute('data-tk-extra-text')) {
           try {
             const extraData = JSON.parse(element.getAttribute('data-tk-extra-text') || '[]') as string[];
-            const allTextNodes: Text[] = [];
-            const walker = doc.createTreeWalker(element, SHOW_TEXT_FILTER);
-            let curr: Text | null = null;
-            while ((curr = walker.nextNode() as Text | null)) {
-              allTextNodes.push(curr);
-            }
             for (let i = 0; i < extraData.length && i + 1 < allTextNodes.length; i++) {
               allTextNodes[i + 1].nodeValue = extraData[i];
             }
@@ -101,7 +124,7 @@ export function removeTranslation(element: HTMLElement): void {
           element.removeAttribute('data-tk-extra-text');
         }
 
-        const primaryTextNode = findPrimaryTextNode(element, doc);
+        const primaryTextNode = allTextNodes[0] || findPrimaryTextNode(element, doc);
         if (primaryTextNode) {
           primaryTextNode.nodeValue = orig;
         } else {
@@ -188,10 +211,11 @@ export function injectLoadingState(
   block: TranslatableBlock,
   mode: TranslationMode = 'bilingual'
 ): HTMLElement | null {
-  // 核心守卫：已翻译替换过的元素绝对不再注入任何加载态或脉冲动效，彻底保持静止
+  // 核心守卫：已翻译替换过或父级已挂载双语译文的元素绝对不再注入任何加载态，彻底杜绝嵌套重复翻译
   if (
     block.element.hasAttribute('data-tk-replaced') ||
-    (typeof block.element.closest === 'function' && block.element.closest('[data-tk-replaced]'))
+    (typeof block.element.closest === 'function' &&
+      block.element.parentElement?.closest('[data-tk-replaced], [data-tk-translated="true"], [data-tk-loading]'))
   ) {
     return null;
   }
@@ -226,6 +250,7 @@ export function injectLoadingState(
   textNode.textContent = '翻译中...';
 
   wrapper.appendChild(textNode);
+  block.element.setAttribute('data-tk-loading', String(Date.now()));
   block.element.appendChild(wrapper);
 
   return wrapper;
@@ -245,6 +270,18 @@ export function injectTranslation(
     return;
   }
 
+  // 若父级祖先已经存在完成的双语译文框 (.translate-king-wrapper.translate-king-done)，绝不在子级重复注入第二条相同译文！
+  if (
+    mode === 'bilingual' &&
+    block.element.parentElement &&
+    typeof block.element.parentElement.closest === 'function'
+  ) {
+    const ancestorTranslated = block.element.parentElement.closest('[data-tk-translated="true"]');
+    if (ancestorTranslated && ancestorTranslated.querySelector('.translate-king-wrapper.translate-king-done')) {
+      return;
+    }
+  }
+
   // 若译文与原文完全相同（例如原帖本身即为中文、或者纯英文专有名词），不挂载冗余重复条目
   if (translatedText.trim() === block.originalText.trim()) {
     return;
@@ -258,23 +295,37 @@ export function injectTranslation(
   // ========================================================
   if (mode === 'replace') {
     el.classList.remove('translate-king-replacing-pulse');
+    if (translatedText.includes('\n')) {
+      el.setAttribute('data-tk-multiline', 'true');
+    }
 
     // 核心分支 A：若当前块包含行内超链接/加粗/引用等子元素，采用 DOM 片段重构机制
     // 彻底解决段落翻译时 <a> 超链接被掏空、[1] 引用变成纯文本的重大缺陷！
     if (block.inlineElements && block.inlineElements.length > 0 && doc) {
+      if (!savedOriginalNodesMap.has(el)) {
+        savedOriginalNodesMap.set(
+          el,
+          Array.from(el.childNodes).map((n) => n.cloneNode(true))
+        );
+      }
       if (!el.hasAttribute('data-tk-orig-html')) {
         el.setAttribute('data-tk-orig-html', el.innerHTML);
       }
+      if (!el.hasAttribute('data-tk-orig-text')) {
+        el.setAttribute('data-tk-orig-text', block.originalText);
+      }
       const fragment = reconstructFragmentFromPlaceholders(translatedText, block.inlineElements, doc);
 
-      // 智能保留原段落的外层统一样式容器 (例如段落全部文字被 <strong> 或 <b> 包裹时，保留加粗外壳)
+      // 智能保留原段落的外层统一样式容器 (例如 YouTube #content-text 内部的 span.yt-core-attributed-string--white-space-pre-wrap 或 <strong>/<b>)
       const firstChildEl = el.firstElementChild as HTMLElement | null;
       const isFullWrapper =
         firstChildEl &&
-        ['STRONG', 'B', 'EM', 'I'].includes(firstChildEl.tagName) &&
+        ['STRONG', 'B', 'EM', 'I', 'SPAN', 'FONT'].includes(firstChildEl.tagName) &&
         firstChildEl.textContent?.trim() === el.textContent?.trim();
 
-      el.innerHTML = '';
+      while (el.firstChild) {
+        el.removeChild(el.firstChild);
+      }
       if (isFullWrapper) {
         const wrapperTag = firstChildEl.cloneNode(false) as HTMLElement;
         wrapperTag.appendChild(fragment);
@@ -289,7 +340,10 @@ export function injectTranslation(
     }
 
     // 核心分支 B：普通文本块（无子行内元素）
-    const textNodes = doc ? findAllNonEmptyTextNodes(el, doc) : [];
+    if (typeof el.querySelectorAll === 'function') {
+      el.querySelectorAll('br').forEach((br) => br.setAttribute('data-tk-hidden-br', 'true'));
+    }
+    const textNodes = doc ? collectManagedTextNodes(el, doc) : [];
 
     if (textNodes.length > 0) {
       const primaryTextNode = textNodes[0];
@@ -299,8 +353,8 @@ export function injectTranslation(
       }
       primaryTextNode.nodeValue = translatedText;
 
-      // 如果当前元素包含多个子文本节点（例如 Twitter 多 span 拼接的 Bio / 简介 / 混合链接）：
-      // 将后续的子文本节点清空为 ''，彻底杜绝多 span 拼接残留英文！
+      // 如果当前元素包含多个子文本节点（例如多行评论、Twitter 多 span 拼接的 Bio / 简介）：
+      // 将后续的子文本节点清空为 ''，彻底杜绝多 span 拼接残留英文或尾部多余空行！
       if (textNodes.length > 1 && !el.hasAttribute('data-tk-extra-text')) {
         const extraData: string[] = [];
         for (let i = 1; i < textNodes.length; i++) {
@@ -369,6 +423,7 @@ export function injectTranslation(
   }
 
   wrapper.appendChild(textNode);
+  block.element.setAttribute('data-tk-translated', 'true');
   block.element.appendChild(wrapper);
 }
 
@@ -383,51 +438,14 @@ export function clearAllTranslations(root: ParentNode = document): void {
   // 2. 还原直接替换过的文本
   const allReplaced = root.querySelectorAll('[data-tk-replaced]');
   allReplaced.forEach((el) => {
-    const htmlEl = el as HTMLElement;
-    htmlEl.classList.remove('translate-king-replacing-pulse');
-
-    if (htmlEl.hasAttribute('data-tk-orig-html')) {
-      htmlEl.innerHTML = htmlEl.getAttribute('data-tk-orig-html') || '';
-      htmlEl.removeAttribute('data-tk-orig-html');
-    } else if (htmlEl.hasAttribute('data-tk-orig-text')) {
-      const orig = htmlEl.getAttribute('data-tk-orig-text');
-      if (orig !== null) {
-        const doc = htmlEl.ownerDocument || (typeof document !== 'undefined' ? document : null);
-        if (doc) {
-          if (htmlEl.hasAttribute('data-tk-extra-text')) {
-            try {
-              const extraData = JSON.parse(htmlEl.getAttribute('data-tk-extra-text') || '[]') as string[];
-              const allTextNodes: Text[] = [];
-              const walker = doc.createTreeWalker(htmlEl, SHOW_TEXT_FILTER);
-              let curr: Text | null = null;
-              while ((curr = walker.nextNode() as Text | null)) {
-                allTextNodes.push(curr);
-              }
-              for (let i = 0; i < extraData.length && i + 1 < allTextNodes.length; i++) {
-                allTextNodes[i + 1].nodeValue = extraData[i];
-              }
-            } catch {
-              // ignore
-            }
-            htmlEl.removeAttribute('data-tk-extra-text');
-          }
-
-          const primaryTextNode = findPrimaryTextNode(htmlEl, doc);
-          if (primaryTextNode) {
-            primaryTextNode.nodeValue = orig;
-          } else {
-            htmlEl.textContent = orig;
-          }
-        } else {
-          htmlEl.textContent = orig;
-        }
-      }
-      htmlEl.removeAttribute('data-tk-orig-text');
-    }
-    htmlEl.removeAttribute('data-tk-replaced');
+    removeTranslation(el as HTMLElement);
   });
 
   // 3. 清理标记
-  const allTagged = root.querySelectorAll('[data-tk-id]');
-  allTagged.forEach((node) => node.removeAttribute('data-tk-id'));
+  const allTagged = root.querySelectorAll('[data-tk-id], [data-tk-loading], [data-tk-translated]');
+  allTagged.forEach((node) => {
+    node.removeAttribute('data-tk-id');
+    node.removeAttribute('data-tk-loading');
+    node.removeAttribute('data-tk-translated');
+  });
 }

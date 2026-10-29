@@ -33,7 +33,6 @@ const REFERENCE_SELECTORS = [
 ].join(',');
 
 // 社交平台（如 X / Twitter）专属绝对噪声选择器（避免误翻译发推输入框、私信输入框、搜索框）
-// 严禁将卡片容器或包含有效文本的组件放入此处的最近祖先查找中，否则会导致卡片内所有正文简介与按钮被整片误杀
 const NOISE_SELECTORS = [
   '[data-testid="tweetTextarea_0"]',
   '[data-testid="DMComposerTextInput"]',
@@ -41,7 +40,7 @@ const NOISE_SELECTORS = [
   '[role="progressbar"]'
 ].join(',');
 
-// 视频播放器与字幕容器保护选择器：绝对禁止全网页 Alt+T 翻译误伤视频播放器与字幕流
+// 视频播放器、字幕容器及翻译王自身所有 UI 组件保护选择器
 const PLAYER_SUBTITLE_SELECTORS = [
   '#movie_player',
   '.html5-video-player',
@@ -55,36 +54,93 @@ const PLAYER_SUBTITLE_SELECTORS = [
   '.ytp-left-controls',
   '.translate-king-bilingual-line',
   '.translate-king-yt-control-btn',
-  'ytd-player'
+  '.translate-king-yt-action-btn',
+  '#translate-king-yt-summary-panel',
+  '#translate-king-yt-subtitle-menu',
+  '#translate-king-floating-ball',
+  '#translate-king-bubble-host',
+  '[id^="translate-king-"]',
+  '[data-tk-ignore="true"]',
+  'ytd-player',
+  'ytd-video-meta-block',
+  '#metadata-line',
+  'ytd-channel-name',
+  '#author-text',
+  '#vote-count-middle'
 ].join(',');
 
 /**
- * 校验元素是否真正处于翻译生效状态。
- * 若 React / Vue 等 SPA 框架在前端路由切换或组件重挂载时重置了子节点内容
- * （表现为译文 wrapper 丢失、或 textContent 还原为 data-tk-orig-text），
+ * 校验某个节点上的 loading 锁是否仍然有效（超过 12 秒视为超时失效并自动清理）
+ */
+function isLoadingLockActive(el: Element): boolean {
+  if (!el.hasAttribute('data-tk-loading')) return false;
+  const ts = Number(el.getAttribute('data-tk-loading') || '0');
+  if (ts > 0 && Date.now() - ts > 12000) {
+    el.removeAttribute('data-tk-loading');
+    el.querySelectorAll('.translate-king-wrapper.translate-king-loading').forEach((n) => n.remove());
+    return false;
+  }
+  return true;
+}
+
+/**
+ * 校验元素是否真正处于翻译生效状态（或正在队列/网络请求中）。
+ * 若 React / Vue 等 SPA 框架在前端路由切换或组件重挂载时重置了子节点内容，
  * 则自动清除过期脏标记，允许自愈式重新提取与翻译。
  */
 export function isElementEffectivelyTranslated(el: Element): boolean {
-  // 1. 如果自身是已完成的翻译容器，或包含有效的已完成双语译文容器，视为有效翻译
+  // 1. 自身即为翻译容器
   if (el.classList?.contains('translate-king-wrapper')) {
-    return el.classList.contains('translate-king-done');
+    return true;
   }
+
+  // 2. 自身正处于异步请求或队列等待锁定态
+  if (isLoadingLockActive(el)) {
+    return true;
+  }
+
+  // 3. 自身内部直接包含已完成或正在加载的翻译容器
   if (typeof el.querySelector === 'function') {
-    const doneWrapper = el.querySelector('.translate-king-wrapper.translate-king-done');
-    if (doneWrapper) {
+    const activeWrapper = el.querySelector(
+      '.translate-king-wrapper.translate-king-done, .translate-king-wrapper.translate-king-loading'
+    );
+    if (activeWrapper) {
       return true;
     }
   }
 
-  // 2. 如果存在直接替换标记，检查其内容是否依然维持译文状态
+  // 4. 若自身标记了 data-tk-translated，但内部 .translate-king-wrapper 已被前端框架重渲染抹除，则自愈清除标记
+  if (typeof el.hasAttribute === 'function' && el.hasAttribute('data-tk-translated')) {
+    const hasWrapper = typeof el.querySelector === 'function' && el.querySelector('.translate-king-wrapper');
+    if (hasWrapper) {
+      return true;
+    }
+    el.removeAttribute('data-tk-translated');
+  }
+
+  // 5. 如果某个祖先节点正在翻译或已经挂载了双语译文容器，
+  // 说明该祖先段落已被整体接管，其内部的任何子 <span> / <a> / <b> 绝不能再被拆碎重复提取！
+  if (typeof el.closest === 'function') {
+    const lockedAncestor = el.closest('[data-tk-translated="true"], [data-tk-loading]');
+    if (lockedAncestor && lockedAncestor !== el) {
+      if (
+        isLoadingLockActive(lockedAncestor) ||
+        lockedAncestor.querySelector('.translate-king-wrapper')
+      ) {
+        return true;
+      } else {
+        lockedAncestor.removeAttribute('data-tk-translated');
+        lockedAncestor.removeAttribute('data-tk-loading');
+      }
+    }
+  }
+
+  // 6. 如果存在直接替换标记，检查其内容是否依然维持译文状态
   if (typeof el.hasAttribute === 'function' && el.hasAttribute('data-tk-replaced')) {
     const origText = el.getAttribute('data-tk-orig-text')?.trim();
     const transText = el.getAttribute('data-tk-trans-text')?.trim();
     const currentText = el.textContent?.trim();
 
-    // 判定情况 A：若当前文本变回了原文，说明已被 React 重新挂载为纯净英文！
-    // 判定情况 B：当前文本为空（如 Twitter 侧栏在聊天页切换为纯图标模式，文本被拔除）
-    // 判定情况 C：有 transText 但当前文本完全不包含已翻译词汇
     const isStillTranslated =
       transText && currentText ? currentText === transText || currentText.includes(transText) : false;
 
@@ -99,7 +155,7 @@ export function isElementEffectivelyTranslated(el: Element): boolean {
     return true;
   }
 
-  // 3. 仅有 data-tk-id 标记但既无 wrapper 容器也无替换状态，说明是 React 重渲染后残留的孤儿属性
+  // 7. 仅有 data-tk-id 标记但既无 wrapper 容器也无替换状态，说明是 React 重渲染后残留的孤儿属性
   if (typeof el.hasAttribute === 'function' && el.hasAttribute('data-tk-id')) {
     el.removeAttribute('data-tk-id');
     return false;
@@ -109,7 +165,7 @@ export function isElementEffectivelyTranslated(el: Element): boolean {
 }
 
 /**
- * 判断指定元素是否应该被忽略（代码、脚本、输入框、或明确声明不翻译的节点）
+ * 判断指定元素是否应该被忽略（代码、脚本、输入框、已翻译段落的子节点、或明确声明不翻译的节点）
  */
 export function shouldIgnoreElement(element: Element): boolean {
   if (IGNORED_TAGS.has(element.tagName)) {
@@ -127,27 +183,53 @@ export function shouldIgnoreElement(element: Element): boolean {
     }
   }
 
-  // 参考文献区域保护：保护外层引文容器与回跳箭头，但允许引文中的正文超链接 (如参考文章标题外链) 进行独立翻译
+  // 参考文献区域保护：保护外层引文容器与回跳箭头，但允许引文中的正文超链接进行独立翻译
   if (
     (typeof element.matches === 'function' && element.matches(REFERENCE_SELECTORS)) ||
     (typeof element.closest === 'function' && element.closest(REFERENCE_SELECTORS))
   ) {
-    // 仅允许引文正文中的内容超链接 (排除 .mw-cite-backlink 回跳箭头/序号)
     if (element.tagName === 'A' && !element.closest('.mw-cite-backlink')) {
       return false;
     }
     return true;
   }
 
-  // 忽略已有翻译容器
+  // 忽略已有翻译容器及翻译王自身所有 UI 组件
   if (
     element.classList?.contains('translate-king-wrapper') ||
-    (typeof element.closest === 'function' && element.closest('.translate-king-wrapper'))
+    (typeof element.closest === 'function' &&
+      element.closest('.translate-king-wrapper, [id^="translate-king-"], [data-tk-ignore="true"]'))
   ) {
     return true;
   }
 
-  // 检查自身或最近祖先是否处于有效替换生效状态 (支持 SPA 框架重刷后自愈)
+  // 核心防重机制：若当前元素或其任何祖先节点正在队列翻译中 (data-tk-loading) 或已完成双语翻译 (data-tk-translated)，
+  // 绝对禁止再提取其内部的任何子 <span> / <a> / <b>（彻底解决评论多行与视频标题重复二次翻译问题！）
+  if (typeof element.closest === 'function') {
+    const ancestorLocked = element.closest('[data-tk-translated="true"], [data-tk-loading]');
+    if (ancestorLocked) {
+      if (isLoadingLockActive(ancestorLocked) || ancestorLocked.querySelector('.translate-king-wrapper')) {
+        return true;
+      }
+    }
+    // 兜底检查父链（最多向上 4 层）是否直接拥有 .translate-king-wrapper 子节点
+    let parent: Element | null = element.parentElement;
+    let depth = 0;
+    while (parent && depth < 4) {
+      if (parent.tagName !== 'BODY' && parent.tagName !== 'MAIN' && parent.tagName !== 'ARTICLE') {
+        const directWrapper = Array.from(parent.children).some((c) =>
+          c.classList?.contains('translate-king-wrapper')
+        );
+        if (directWrapper) {
+          return true;
+        }
+      }
+      parent = parent.parentElement;
+      depth++;
+    }
+  }
+
+  // 检查自身或最近祖先是否处于有效替换生效状态
   if (typeof element.closest === 'function') {
     const replacedAncestor = element.closest('[data-tk-replaced]');
     if (replacedAncestor && isElementEffectivelyTranslated(replacedAncestor)) {
@@ -161,9 +243,11 @@ export function shouldIgnoreElement(element: Element): boolean {
     }
   }
 
-  // 若自身包含尚未过期的有效翻译子块，则外层容器不作为叶子重复提取
+  // 若自身包含尚未过期的有效翻译子块或正在加载的子块，则外层容器不作为叶子重复提取
   if (typeof element.querySelector === 'function') {
-    const childTranslated = element.querySelector('.translate-king-wrapper, [data-tk-replaced]');
+    const childTranslated = element.querySelector(
+      '.translate-king-wrapper, [data-tk-replaced], [data-tk-loading], [data-tk-translated="true"]'
+    );
     if (childTranslated && isElementEffectivelyTranslated(childTranslated)) {
       return true;
     }
@@ -176,13 +260,13 @@ export function shouldIgnoreElement(element: Element): boolean {
     element.classList.contains('mw-editsection-bracket') ||
     element.classList.contains('vector-toc-numb') ||
     (typeof element.closest === 'function' &&
-      element.closest('.mw-editsection-bracket, .vector-toc-numb')) ||
-    element.isContentEditable
+      element.closest('.mw-editsection-bracket, .vector-toc-numb, [translate="no"], .notranslate')) ||
+    (element as HTMLElement).isContentEditable
   ) {
     return true;
   }
 
-  // 检查是否属于特定平台噪声容器（如 Twitter 用户名、输入框、趋势）
+  // 检查是否属于特定平台噪声容器
   if (typeof element.matches === 'function' && element.matches(NOISE_SELECTORS)) {
     return true;
   }
@@ -190,7 +274,7 @@ export function shouldIgnoreElement(element: Element): boolean {
     return true;
   }
 
-  // 严格保护视频播放器及字幕容器，避免全网页 Alt+T 翻译破坏视频播放与原生字幕
+  // 严格保护视频播放器及字幕容器
   if (typeof element.matches === 'function' && element.matches(PLAYER_SUBTITLE_SELECTORS)) {
     return true;
   }
@@ -205,8 +289,14 @@ export function shouldIgnoreElement(element: Element): boolean {
  * 启发式检验文本内容是否承载有效可读语言信息
  */
 export function isValidTranslatableText(text: string): boolean {
-  const trimmed = text.trim();
+  // 剔除 <xN> 占位符标签后再检测纯文本语义
+  const trimmed = text.replace(/<\/?x\d+[^>]*>/gi, '').trim();
   if (trimmed.length < 2) {
+    return false;
+  }
+
+  // 必须至少包含一个真正的语言文字字符 (\p{L})，彻底过滤纯 Emoji (如 "🔥", "📔", "👍")、纯数字和纯符号
+  if (!/\p{L}/u.test(trimmed)) {
     return false;
   }
 
@@ -221,7 +311,7 @@ export function isValidTranslatableText(text: string): boolean {
   }
 
   // 社交账号 Handle (如 @elonmusk, @jasondemers5) 绝不翻译
-  if (/^@[\w_]+$/.test(trimmed)) {
+  if (/^@[\w_.-]+$/.test(trimmed)) {
     return false;
   }
 
@@ -230,15 +320,57 @@ export function isValidTranslatableText(text: string): boolean {
     return false;
   }
 
-  // 时间与时钟时间戳 (如 3:15 PM, 12:00 AM, 14:30, 2h, 5m, 1d, 3w, 10s, 3 mins ago) 绝不翻译
+  // 时间与时钟时间戳 (如 3:15 PM, 12:00 AM, 14:30) 绝不翻译
   if (/^\d{1,2}:\d{2}(?::\d{2})?\s*(?:[ap]\.?m\.?)?$/i.test(trimmed)) {
     return false;
   }
 
-  // 时间简写 (如 2h, 5m, 1d, 3w, 10s, 5 mins) 绝不翻译
-  if (/^\d+\s*(?:[smhdwMy]|sec|secs|min|mins|hr|hrs|day|days|week|weeks|month|months|year|years|ago)$/i.test(trimmed)) {
+  // 英文/中文播放量与相对时间短语 (如 2h, 5m, 3 years ago, 411万, 3年前, 4个月前, 11天前, 10,803 条评论, 145 条回复, 4年前（修改过）) 绝不翻译
+  if (
+    /^\d[\d,.]*\s*(?:[smhdwMykKmMbB]|sec|secs|min|mins|hr|hrs|day|days|week|weeks|month|months|year|years|ago|views|万|亿|次观看|条评论|条回复|年前|个月前|周前|天前|小时前|分钟前|秒前)(?:\s*[（(].*[)）])?$/i.test(
+      trimmed
+    )
+  ) {
+    return false;
+  }
+
+  // 剔除 @用户名 和 URL 后必须仍包含有效语言文字
+  const withoutHandlesAndUrls = trimmed
+    .replace(/@[\w_.-]+/g, '')
+    .replace(/https?:\/\/\S+/gi, '')
+    .trim();
+
+  if (!withoutHandlesAndUrls || !/\p{L}/u.test(withoutHandlesAndUrls)) {
     return false;
   }
 
   return true;
+}
+
+/**
+ * 判断文本是否已经处于目标语言（例如目标语言为 zh-CN 时，纯中文 UI 词条和中文标题无需再翻译）
+ */
+export function isAlreadyInTargetLanguage(text: string, targetLang?: string): boolean {
+  if (!targetLang || (targetLang !== 'zh-CN' && targetLang !== 'zh-TW')) {
+    return false;
+  }
+
+  const clean = text
+    .replace(/<\/?x\d+[^>]*>/gi, '')
+    .replace(/@[\w_.-]+/g, '')
+    .replace(/https?:\/\/\S+/gi, '')
+    .trim();
+
+  const cjkCount = (clean.match(/[\u4e00-\u9fa5]/g) || []).length;
+  if (cjkCount === 0) return false;
+
+  const hasForeignWord = /[a-zA-Z\u0400-\u04FF\u3040-\u30FF\uAC00-\uD7AF]{2,}/.test(clean);
+
+  // 1. 含中文且不含任何连续外文单词（如 "排序方式"、"添加评论..."、"已由@programmingwithmosh置顶"、"回复"）
+  // 2. 已包含 >= 4 个汉字的中文标题/句子（如 "JavaScript初学者教程：1小时学会JavaScript"）
+  if (!hasForeignWord || cjkCount >= 4) {
+    return true;
+  }
+
+  return false;
 }

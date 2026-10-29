@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>翻译王 (TranslateKing) - 设置中心</title>
+  <link rel="stylesheet" href="/src/options/options.css" />
+</head>
+<body>
+  <!-- 顶部毛玻璃固定导航栏 -->
+  <header class="top-navbar">
+    <div class="nav-container">
+      <div class="brand-area">
+        <img src="/icons/icon-48.png" alt="Logo" class="brand-logo" />
+        <div>
+          <div class="brand-title">
+            <span>翻译王 TranslateKing</span>
+            <span class="version-badge">v1.3 旗舰版</span>
+          </div>
+          <div class="brand-sub">全网网页双语对照 · YouTube 实时字幕与时间轴总结 · 多引擎 AI 网关</div>
+        </div>
+      </div>
+      <div class="nav-actions">
+        <span id="saveToast" class="save-toast">✓ 设置已自动保存并实时同步</span>
+        <button id="resetConfigBtn" class="btn-outline">恢复默认设置</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- 主体双栏布局 (左侧固定 250px 导航 + 右侧卡片内容区，完全对标 options.html#general) -->
+  <div class="layout-container">
+    <aside class="sidebar">
+      <nav class="menu-nav">
+        <div class="menu-group-label">核心功能设置</div>
+        <a href="#general" class="nav-item active" data-section="general">
+          <span class="nav-icon">⚙️</span>
+          <span>基本设置</span>
+        </a>
+        <a href="#services" class="nav-item" data-section="services">
+          <span class="nav-icon">🚀</span>
+          <span>翻译服务</span>
+        </a>
+        <a href="#subtitle" class="nav-item" data-section="subtitle">
+          <span class="nav-icon">🎬</span>
+          <span>视频双语字幕</span>
+        </a>
+        <a href="#mouse-input" class="nav-item" data-section="mouse-input">
+          <span class="nav-icon">🖱️</span>
+          <span>划词 · 悬停 · 输入框</span>
+        </a>
+        <a href="#floating-ball" class="nav-item" data-section="floating-ball">
+          <span class="nav-icon">🌐</span>
+          <span>悬浮球与网站规则</span>
+        </a>
+
+        <div class="menu-group-label" style="margin-top: 18px;">个人数据中心</div>
+        <a href="#vocabulary" class="nav-item" data-section="vocabulary">
+          <span class="nav-icon">📖</span>
+          <span>我的生词本</span>
+          <span id="navVocabCount" class="nav-badge">0</span>
+        </a>
+      </nav>
+    </aside>
+
+    <main class="content-area">
+      <!-- ==================== 1. 基本设置 (#general) ==================== -->
+      <section id="section-general" class="settings-section active">
+        <div class="section-header">
+          <h2>基本设置</h2>
+          <p>自定义网页翻译目标语言、双语伴读显示模式与译文视觉主题（修改后在所有已打开网页实时生效）</p>
+        </div>
+
+        <div class="settings-card">
+          <div class="setting-item">
+            <div class="setting-info">
+              <div class="setting-title">目标译文语言 (Target Language)</div>
+              <div class="setting-desc">网页全文翻译、视频双语字幕及划词例句的默认目标语言</div>
+            </div>
+            <select id="optTargetLang" class="form-select">
+              <option value="zh-CN">简体中文 (zh-CN)</option>
+              <option value="zh-TW">繁体中文 (zh-TW)</option>
+              <option value="en">英语 (English)</option>
+              <option value="ja">日语 (日本語)</option>
+              <option value="ko">韩语 (한국어)</option>
+              <option value="fr">法语 (Français)</option>
+              <option value="de">德语 (Deutsch)</option>
+              <option value="es">西班牙语 (Español)</option>
+              <option value="ru">俄语 (Русский)</option>
+            </select>
+          </div>
+
+          <div class="setting-item">
+            <div class="setting-info">
+              <div class="setting-title">网页翻译显示模式</div>
+              <div class="setting-desc">选择「双语对照」保留原文上下对比阅读，或「仅看译文」像原生中文网页一样无感浏览</div>
+            </div>
+            <select id="optTranslationMode" class="form-select">
+              <option value="bilingual">📖 双语对照伴读 (保留原文 · 译文在下方)</option>
+              <option value="replace">🇨🇳 仅看译文 / 纯中文直接替换 (含按钮)</option>
+            </select>
+          </div>
+
+          <div class="setting-item-vertical">
+            <div class="setting-info">
+              <div class="setting-title">双语译文样式主题 (带实时预览)</div>
+              <div class="setting-desc">点击下方任一卡片即可切换网页双语译文的呈现风格，「纯净无框」将 100% 继承原文的字体、字号与颜色</div>
+            </div>
+
+            <div class="theme-cards-grid" id="themeCardsGrid">
+              <div class="theme-option-card active" data-theme-val="default">
+                <div class="theme-card-head">
+                  <span class="theme-card-name">▏ 经典蓝框 (默认)</span>
+                  <span class="theme-check">✓</span>
+                </div>
+                <div class="theme-card-desc">左侧 3px 皇家蓝引用边栏 + 淡蓝微底色，层次最分明</div>
+              </div>
+
+              <div class="theme-option-card" data-theme-val="clean">
+                <div class="theme-card-head">
+                  <span class="theme-card-name">✨ 纯净无框 (同原文色)</span>
+                  <span class="theme-check">✓</span>
+                </div>
+                <div class="theme-card-desc">无底色无边栏，字体、字号、颜色与原文完全一致</div>
+              </div>
+
+              <div class="theme-option-card" data-theme-val="underline">
+                <div class="theme-card-head">
+                  <span class="theme-card-name">〰️ 蓝色虚线下划线</span>
+                  <span class="theme-check">✓</span>
+                </div>
+                <div class="theme-card-desc">去除底色背景，译文底部配精致皇家蓝虚线</div>
+              </div>
+
+              <div class="theme-option-card" data-theme-val="mask">
+                <div class="theme-card-head">
+                  <span class="theme-card-name">👁️ 模糊学习遮罩</span>
+                  <span class="theme-check">✓</span>
+                </div>
+                <div class="theme-card-desc">译文默认高斯模糊，鼠标悬停到段落上才清晰显现</div>
+              </div>
+            </div>
+
+            <!-- 实时网页双语排版预览盒 -->
+            <div class="live-preview-box">
+              <div class="preview-badge">实时排版预览</div>
+              <p class="preview-orig">
+                Artificial intelligence is transforming software engineering by combining large language models with systematic verification workflows.
+              </p>
+              <div id="webThemePreviewTarget" class="preview-trans theme-default">
+                人工智能正在通过将大语言模型与系统化验证工作流相结合来变革软件工程。
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== 2. 翻译服务 (#services) ==================== -->
+      <section id="section-services" class="settings-section">
+        <div class="section-header">
+          <h2>翻译服务引擎 (#services)</h2>
+          <p>内置免配置免费高速专线（Microsoft Edge + Google 官方通道自动容灾），并支持接入 DeepSeek / OpenAI 等任意大模型</p>
+        </div>
+
+        <div class="settings-card">
+          <div class="setting-item-vertical">
+            <div class="setting-info">
+              <div class="setting-title">选择主力翻译服务</div>
+              <div class="setting-desc">当选用 AI 大模型但未填 Key 或网络超时，网关会自动零中断无缝降级至免 Key 专线</div>
+            </div>
+
+            <div class="service-cards-grid" id="serviceCardsGrid">
+              <div class="service-card active" data-provider="auto">
+                <div class="service-card-top">
+                  <span class="service-icon">🚀</span>
+                  <span class="service-tag tag-free">推荐 · 免Key</span>
+                </div>
+                <div class="service-name">智能双擎容灾网关</div>
+                <div class="service-sub">Microsoft Edge + Google + MyMemory 毫秒级自动切换</div>
+              </div>
+
+              <div class="service-card" data-provider="microsoft">
+                <div class="service-card-top">
+                  <span class="service-icon">⚡</span>
+                  <span class="service-tag tag-free">免Key专线</span>
+                </div>
+                <div class="service-name">Microsoft 必应神经网络</div>
+                <div class="service-sub">微软官方浏览器内建批量接口，原生保留超链接与富文本标签</div>
+              </div>
+
+              <div class="service-card" data-provider="google">
+                <div class="service-card-top">
+                  <span class="service-icon">🌐</span>
+                  <span class="service-tag tag-free">免Key专线</span>
+                </div>
+                <div class="service-name">Google 官方翻译专线</div>
+                <div class="service-sub">谷歌 Chrome 官方 Web 批量协议通道，精准地道</div>
+              </div>
+
+              <div class="service-card" data-provider="deepseek">
+                <div class="service-card-top">
+                  <span class="service-icon">🧠</span>
+                  <span class="service-tag tag-ai">AI 大模型</span>
+                </div>
+                <div class="service-name">DeepSeek V3 / Chat</div>
+                <div class="service-sub">深度求索高性价比大模型，长难句语境与技术术语极佳</div>
+              </div>
+
+              <div class="service-card" data-provider="openai">
+                <div class="service-card-top">
+                  <span class="service-icon">🤖</span>
+                  <span class="service-tag tag-ai">自定义兼容</span>
+                </div>
+                <div class="service-name">OpenAI / 硅基流动 / Ollama</div>
+                <div class="service-sub">支持接入 ChatGPT、Claude 转发、通义千问、智谱 GLM 等任意兼容接口</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="ai-config-panel">
+            <div class="setting-title" style="margin-bottom: 12px;">🔑 AI 大模型接口参数配置 (DeepSeek / OpenAI 兼容协议)</div>
+            <div class="form-grid">
+              <div class="form-field">
+                <label for="optAiApiKey">API Key 密钥</label>
+                <input id="optAiApiKey" type="password" class="form-input" placeholder="sk-..." />
+              </div>
+              <div class="form-field">
+                <label for="optAiModel">模型名称 (Model)</label>
+                <input id="optAiModel" type="text" class="form-input" placeholder="默认 deepseek-chat 或 gpt-4o-mini" />
+              </div>
+              <div class="form-field form-field-full">
+                <label for="optAiApiUrl">自定义 API 接口地址 (Endpoint URL)</label>
+                <input id="optAiApiUrl" type="text" class="form-input" placeholder="https://api.deepseek.com/v1/chat/completions" />
+              </div>
+            </div>
+            <div style="margin-top: 12px; display: flex; align-items: center; gap: 12px;">
+              <button id="testServiceBtn" class="btn-primary">⚡ 测试当前翻译服务</button>
+              <span id="testServiceResult" class="test-result-text"></span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== 3. 视频双语字幕 (#subtitle) ==================== -->
+      <section id="section-subtitle" class="settings-section">
+        <div class="section-header">
+          <h2>视频双语字幕设置 (#subtitle)</h2>
+          <p>深度定制 YouTube 原位双语字幕的显示方式、位置、字号、色彩与听力学习模式（与播放器内 ⚙ 菜单双向实时同步）</p>
+        </div>
+
+        <div class="settings-card">
+          <div class="setting-item">
+            <div class="setting-info">
+              <div class="setting-title">自动开启 YouTube 双语字幕</div>
+              <div class="setting-desc">打开 YouTube 视频时自动挂载双语字幕与右下角 [双语 ON | ⚙] 控制按钮</div>
+            </div>
+            <input type="checkbox" id="ytEnabled" class="ios-switch" checked />
+          </div>
+
+          <div class="setting-item">
+            <div class="setting-info">
+              <div class="setting-title">字幕显示模式</div>
+              <div class="setting-desc">「双语对照」同时展示原生外文与中文译文；「仅看译文」自动隐藏外文字幕只看中文</div>
+            </div>
+            <select id="ytDisplayMode" class="form-select">
+              <option value="bilingual">双语对照 (外文 + 中文)</option>
+              <option value="translation-only">仅看译文 (纯中文字幕)</option>
+            </select>
+          </div>
+
+          <div class="setting-item">
+            <div class="setting-info">
+              <div class="setting-title">译文显示位置</div>
+              <div class="setting-desc">调整中文译文位于原文字幕的下方或上方</div>
+            </div>
+            <select id="ytPosition" class="form-select">
+              <option value="bottom">原文下方 (推荐)</option>
+              <option value="top">原文上方</option>
+            </select>
+          </div>
+
+          <div class="setting-item">
+            <div class="setting-info">
+              <div class="setting-title">译文字号比例</div>
+              <div class="setting-desc">基于播放器当前尺寸自适应匹配字号后的额外缩放比例</div>
+            </div>
+            <select id="ytFontScale" class="form-select">
+              <option value="0.8">小号 (80%)</option>
+              <option value="1">标准 (100%)</option>
+              <option value="1.2">大号 (120%)</option>
+              <option value="1.45">特大号 (145%)</option>
+            </select>
+          </div>
+
+          <div class="setting-item">
+            <div class="setting-info">
+              <div class="setting-title">译文字体颜色</div>
+              <div class="setting-desc">在复杂明暗视频画面中突出显示中文字幕的色彩</div>
+            </div>
+            <select id="ytTextColor" class="form-select">
+              <option value="#FEF08A">柠檬亮黄 (#FEF08A · 影院经典)</option>
+              <option value="#FFFFFF">纯净亮白 (#FFFFFF)</option>
+              <option value="#22D3EE">科技冰青 (#22D3EE)</option>
+              <option value="#4ADE80">护眼翠绿 (#4ADE80)</option>
+              <option value="#F472B6">活力柔粉 (#F472B6)</option>
+            </select>
+          </div>
+
+          <div class="setting-item">
+            <div class="setting-info">
+              <div class="setting-title">字幕背景不透明度</div>
+              <div class="setting-desc">调整字幕黑底衬托框的深浅程度</div>
+            </div>
+            <select id="ytBgOpacity" class="form-select">
+              <option value="0">完全透明 (0%)</option>
+              <option value="0.5">半透明 (50%)</option>
+              <option value="0.78">标准深底 (78%)</option>
+              <option value="0.95">深黑高对比 (95%)</option>
+            </select>
+          </div>
+
+          <div class="setting-item">
+            <div class="setting-info">
+              <div class="setting-title">听力学习模式 (模糊遮罩)</div>
+              <div class="setting-desc">开启后中文字幕默认模糊隐藏，鼠标移到字幕上时才清晰显示，练英语听力利器</div>
+            </div>
+            <input type="checkbox" id="ytLearningMask" class="ios-switch" />
+          </div>
+
+          <div class="setting-item">
+            <div class="setting-info">
+              <div class="setting-title">鼠标悬停字幕自动暂停视频</div>
+              <div class="setting-desc">鼠标移到视频字幕上查词时自动暂停播放，移开鼠标自动继续播放</div>
+            </div>
+            <input type="checkbox" id="ytHoverPause" class="ios-switch" checked />
+          </div>
+
+          <!-- 视频双语字幕实时预览屏 -->
+          <div class="video-preview-screen">
+            <div class="video-preview-caption-box" id="ytPreviewBox">
+              <div class="video-preview-orig" id="ytPreviewOrig">Welcome to the complete SQL masterclass course.</div>
+              <div class="video-preview-trans" id="ytPreviewTrans">欢迎来到完整的 SQL 大师班课程。</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== 4. 划词 · 悬停 · 输入框 (#mouse-input) ==================== -->
+      <section id="section-mouse-input" class="settings-section">
+        <div class="section-header">
+          <h2>鼠标划词 · 悬停单段翻译 · 输入框三空格翻译</h2>
+          <p>边读边查生词、按住快捷键指向任意段落即刻速译、在任意输入框用母语打字连按三下空格秒变地道外语</p>
+        </div>
+
+        <div class="settings-card">
+          <div class="setting-item">
+            <div class="setting-info">
+              <div class="setting-title">开启鼠标选中划词翻译 (中英双向)</div>
+              <div class="setting-desc">在网页选中单词或短句时弹出 Shadow DOM 释义卡片（含音标、离线发音、原句双语例句与生词收藏）</div>
+            </div>
+            <input type="checkbox" id="optEnableSelection" class="ios-switch" checked />
+          </div>
+
+          <div class="setting-item">
+            <div class="setting-info">
+              <div class="setting-title">按住 Alt 键 + 鼠标悬停单段即时翻译</div>
+              <div class="setting-desc">无需开启全页翻译，按住键盘 <kbd>Alt</kbd>（Mac 下为 <kbd>Option ⌥</kbd>）并将鼠标指针移到任意段落上，即刻单独翻译或还原该段落</div>
+            </div>
+            <span class="status-tag">已内置启用</span>
+          </div>
+
+          <div class="setting-item-vertical">
+            <div class="setting-info">
+              <div class="setting-title">输入框连按 3 次空格翻译 (<kbd>Space</kbd> × 3) · 在线沙盒测试</div>
+              <div class="setting-desc">在全网任意搜索框、X/Twitter 发推框、YouTube 评论框输入中文后，快速连按 3 下空格键，文字会自动替换为地道英文！你可以在下方输入框直接体验：</div>
+            </div>
+            <input
+              id="sandboxTripleSpaceInput"
+              type="text"
+              class="form-input"
+              style="margin-top: 8px; font-size: 14px;"
+              value="你好，请问这个开源项目如何本地部署？"
+              placeholder="在此输入任意中文，然后快速连按 3 下空格键试试！"
+            />
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== 5. 悬浮球与网站规则 (#floating-ball) ==================== -->
+      <section id="section-floating-ball" class="settings-section">
+        <div class="section-header">
+          <h2>侧边悬浮球与自动翻译网站规则</h2>
+          <p>管理页面右侧快捷翻译胶囊悬浮球，以及打开即自动翻译的域名白名单</p>
+        </div>
+
+        <div class="settings-card">
+          <div class="setting-item">
+            <div class="setting-info">
+              <div class="setting-title">显示网页右侧快捷翻译悬浮球</div>
+              <div class="setting-desc">停靠在屏幕右缘的半隐藏胶囊按钮，支持上下拖拽位置、单击切换翻译、悬停展开样式切换菜单</div>
+            </div>
+            <input type="checkbox" id="optEnableFloatingBall" class="ios-switch" checked />
+          </div>
+
+          <div class="setting-item-vertical">
+            <div class="setting-info">
+              <div class="setting-title">始终自动翻译的网站列表 (域名白名单)</div>
+              <div class="setting-desc">访问以下域名时将自动开启网页双语翻译，无需手动按 Alt+T</div>
+            </div>
+
+            <div class="domain-add-row">
+              <input id="newDomainInput" type="text" class="form-input" placeholder="输入域名，例如 x.com 或 news.ycombinator.com" />
+              <button id="addDomainBtn" class="btn-primary">添加网站</button>
+            </div>
+
+            <div id="domainListContainer" class="domain-tags-wrap"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== 6. 我的生词本 (#vocabulary) ==================== -->
+      <section id="section-vocabulary" class="settings-section">
+        <div class="section-header">
+          <div style="display: flex; align-items: center; justify-content: space-between;">
+            <div>
+              <h2>我的生词本</h2>
+              <p>汇总你在阅读外文网页与观看 YouTube 视频时划词收藏的所有生词与原句语境</p>
+            </div>
+            <div style="display: flex; gap: 10px;">
+              <button id="exportVocabCsvBtn" class="btn-primary">📥 导出 CSV 表格</button>
+              <button id="clearVocabBtn" class="btn-outline">清空生词本</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-card" id="vocabFullTableContainer"></div>
+      </section>
+    </main>
+  </div>
+
+  <script type="module" src="/src/options/options.ts"></script>
+</body>
+</html>

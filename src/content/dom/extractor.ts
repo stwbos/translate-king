@@ -5,7 +5,12 @@
  * 涵盖推文、文章、用户简介、人名音译、操作按钮、趋势话题、导航选项及标签页。
  */
 
-import { shouldIgnoreElement, isValidTranslatableText, isElementEffectivelyTranslated } from './filter';
+import {
+  shouldIgnoreElement,
+  isValidTranslatableText,
+  isElementEffectivelyTranslated,
+  isAlreadyInTargetLanguage
+} from './filter';
 
 export interface TranslatableBlock {
   id: string;
@@ -15,6 +20,66 @@ export interface TranslatableBlock {
 }
 
 const INLINE_TAGS = new Set(['A', 'B', 'STRONG', 'I', 'EM', 'CODE', 'SUP', 'SUB']);
+
+function isInlineFormattingTag(el: HTMLElement): boolean {
+  if (INLINE_TAGS.has(el.tagName)) return true;
+  if (el.tagName === 'SPAN' && typeof el.className === 'string') {
+    return (
+      el.className.includes('attributed-string--bold') ||
+      el.className.includes('attributed-string--italic') ||
+      el.className.includes('attributed-string--strikethrough')
+    );
+  }
+  return false;
+}
+
+/**
+ * 判断元素是否为保留原生换行符 (\n) 的评论/帖子/预格式化容器
+ */
+function isPreformattedOrCommentElement(el: HTMLElement): boolean {
+  if (
+    el.id === 'content-text' ||
+    el.tagName === 'YT-ATTRIBUTED-STRING' ||
+    el.tagName === 'YT-FORMATTED-STRING' ||
+    el.querySelector?.('.yt-core-attributed-string--white-space-pre-wrap, [style*="pre-wrap"], [style*="pre-line"]')
+  ) {
+    return true;
+  }
+  if (
+    typeof el.matches === 'function' &&
+    el.matches(
+      '#content-text, [data-testid="tweetText"], [data-testid="UserDescription"], [data-testid="messageText"], [data-testid="postText"], [slot="comment"], [slot="text-body"]'
+    )
+  ) {
+    return true;
+  }
+  if (
+    typeof el.closest === 'function' &&
+    el.closest(
+      '#content-text, [data-testid="tweetText"], [data-testid="UserDescription"], [data-testid="messageEntry"], shreddit-comment, shreddit-post'
+    )
+  ) {
+    return true;
+  }
+  if (typeof window !== 'undefined' && typeof window.getComputedStyle === 'function') {
+    try {
+      const ws = window.getComputedStyle(el).whiteSpace;
+      if (ws === 'pre' || ws === 'pre-wrap' || ws === 'pre-line' || ws === 'break-spaces') {
+        return true;
+      }
+      const firstChild = el.firstElementChild as HTMLElement | null;
+      if (firstChild) {
+        const childWs = window.getComputedStyle(firstChild).whiteSpace;
+        if (childWs === 'pre' || childWs === 'pre-wrap' || childWs === 'pre-line' || childWs === 'break-spaces') {
+          return true;
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return false;
+}
 
 /**
  * 递归检索当前元素下第一层（顶层）行内格式化与超链接子元素
@@ -32,7 +97,7 @@ export function findTopLevelInlineElements(root: HTMLElement): HTMLElement[] {
         const nestedAnchor = el.querySelector('a');
         const hasMixedAnchor = el.tagName !== 'A' && nestedAnchor !== null && el.textContent?.trim() !== nestedAnchor.textContent?.trim();
 
-        if (INLINE_TAGS.has(el.tagName) && !isEntireWrapper && !hasMixedAnchor) {
+        if (isInlineFormattingTag(el) && !isEntireWrapper && !hasMixedAnchor) {
           results.push(el);
         } else {
           traverse(el);
@@ -253,7 +318,10 @@ function extractTwitterConversationRow(
  * 遍历 DOM 提取当前页面上承载语义的待翻译文本块
  * 采用“阶段0 Twitter私信专属引擎 + 阶段1 语义原子块优先 + 阶段2 通用叶子文本容器兜底”策略，达到 Google 翻译同款 100% 覆盖率
  */
-export function extractTranslatableBlocks(root: ParentNode = document): TranslatableBlock[] {
+export function extractTranslatableBlocks(
+  root: ParentNode = document,
+  targetLang?: string
+): TranslatableBlock[] {
   const blocks: TranslatableBlock[] = [];
   const processedElements = new Set<HTMLElement>();
 
@@ -303,7 +371,7 @@ export function extractTranslatableBlocks(root: ParentNode = document): Translat
     try {
       const atomicElements = root.querySelectorAll<HTMLElement>(chunkSelector);
       for (let j = 0; j < atomicElements.length; j++) {
-        processElement(atomicElements[j], blocks, processedElements);
+        processElement(atomicElements[j], blocks, processedElements, targetLang);
       }
     } catch {
       // 容错降级
@@ -344,7 +412,7 @@ export function extractTranslatableBlocks(root: ParentNode = document): Translat
       continue;
     }
 
-    processElement(el, blocks, processedElements);
+    processElement(el, blocks, processedElements, targetLang);
   }
 
   return blocks;
@@ -356,7 +424,8 @@ export function extractTranslatableBlocks(root: ParentNode = document): Translat
 function processElement(
   el: HTMLElement,
   blocks: TranslatableBlock[],
-  processedElements: Set<HTMLElement>
+  processedElements: Set<HTMLElement>,
+  targetLang?: string
 ): void {
   if (processedElements.has(el)) return;
   if (isElementEffectivelyTranslated(el)) return;
@@ -396,16 +465,32 @@ function processElement(
         img.remove();
       }
     });
+
+    // 将 <br> 换行标签显式转换为换行占位符 \uE000，防止 textContent 丢失网页/评论中的 <br> 换行排版
+    clone.querySelectorAll('br').forEach((br) => {
+      const next = br.nextSibling;
+      if (next && next.nodeType === 3 && next.nodeValue) {
+        next.nodeValue = next.nodeValue.replace(/^[ \t]*\r?\n[ \t]*/, '');
+      }
+      const prev = br.previousSibling;
+      if (prev && prev.nodeType === 3 && prev.nodeValue) {
+        prev.nodeValue = prev.nodeValue.replace(/[ \t]*\r?\n[ \t]*$/, '');
+      }
+      if (typeof (br as any).replaceWith === 'function') {
+        (br as any).replaceWith('\uE000');
+      }
+    });
   }
 
   // 检查是否包含子超链接/加粗/引用等行内元素，若包含则执行占位符编码以保证译文 100% 保留超链接与样式
   const inlineElements = findTopLevelInlineElements(el);
+  const preserveNativeNewlines = isPreformattedOrCommentElement(el);
   let rawText = '';
 
   if (inlineElements.length > 0) {
     const cloneInlines = findTopLevelInlineElements(clone);
     cloneInlines.forEach((childEl, idx) => {
-      const childText = (childEl.textContent || '').trim();
+      const childText = (childEl.textContent || '').replace(/\uE000/g, '\n').trim();
       const doc = childEl.ownerDocument || (typeof document !== 'undefined' ? document : null);
       if (doc) {
         const placeholder = doc.createTextNode(`<x${idx}>${childText}</x${idx}>`);
@@ -419,7 +504,18 @@ function processElement(
     rawText = (clone.textContent || '').trim();
   }
 
-  if (!isValidTranslatableText(rawText)) {
+  if (preserveNativeNewlines) {
+    rawText = rawText.replace(/\uE000/g, '\n').replace(/\r\n/g, '\n');
+  } else {
+    // 非预格式化容器：保留双换行段落间隔与 <br> (\uE000)，将 HTML 源码缩进单换行折叠为空格
+    rawText = rawText
+      .replace(/\r\n/g, '\n')
+      .replace(/\n[ \t]*\n/g, '\uE000\uE000')
+      .replace(/[ \t]*\n[ \t]*/g, ' ')
+      .replace(/\uE000/g, '\n');
+  }
+
+  if (!isValidTranslatableText(rawText) || isAlreadyInTargetLanguage(rawText, targetLang)) {
     return;
   }
 

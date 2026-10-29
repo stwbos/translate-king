@@ -85,16 +85,33 @@ export class SelectionFloatingCard {
         line-height: 1.5;
       }
       .card {
-        width: 320px;
-        max-width: 90vw;
+        width: 340px;
+        max-width: calc(100vw - 24px);
+        max-height: min(420px, calc(100vh - 24px));
+        display: flex;
+        flex-direction: column;
         background: #ffffff;
         border: 1px solid #e2e8f0;
         border-radius: 12px;
-        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.12), 0 8px 10px -6px rgba(0, 0, 0, 0.08);
+        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.14), 0 8px 10px -6px rgba(0, 0, 0, 0.08);
         padding: 14px;
         box-sizing: border-box;
         animation: tk-fade-in 0.15s cubic-bezier(0.16, 1, 0.3, 1);
         user-select: text;
+        overflow: hidden;
+      }
+      .card-body {
+        overflow-y: auto;
+        max-height: min(310px, calc(100vh - 120px));
+        padding-right: 2px;
+        overscroll-behavior: contain;
+      }
+      .card-body::-webkit-scrollbar {
+        width: 5px;
+      }
+      .card-body::-webkit-scrollbar-thumb {
+        background: #cbd5e1;
+        border-radius: 4px;
       }
       @keyframes tk-fade-in {
         from { opacity: 0; transform: translateY(4px); }
@@ -193,87 +210,142 @@ export class SelectionFloatingCard {
   }
 
   /**
-   * 在鼠标选区位置显示加载中
+   * 在鼠标选区位置显示加载中 (纯 DOM 构建，兼容 YouTube TrustedTypes CSP)
    */
   public showLoading(range: Range, word: string): void {
     this.isSaved = false;
     this.currentResult = null;
-    this.positionNearRange(range);
 
     const contentDiv = document.createElement('div');
     contentDiv.className = 'card';
-    contentDiv.innerHTML = `
-      <div class="header">
-        <span class="word-title">${word}</span>
-        <button class="icon-btn close-btn">✕</button>
-      </div>
-      <div class="loading">正在极速查询释义与语境...</div>
-    `;
 
-    contentDiv.querySelector('.close-btn')?.addEventListener('click', () => this.hide());
+    const header = document.createElement('div');
+    header.className = 'header';
+    const titleSpan = document.createElement('span');
+    titleSpan.className = 'word-title';
+    titleSpan.textContent = word;
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'icon-btn close-btn';
+    closeBtn.textContent = '✕';
+    closeBtn.addEventListener('click', () => this.hide());
+    header.appendChild(titleSpan);
+    header.appendChild(closeBtn);
+
+    const loadingDiv = document.createElement('div');
+    loadingDiv.className = 'loading';
+    loadingDiv.textContent = '正在极速查询释义与语境...';
+
+    contentDiv.appendChild(header);
+    contentDiv.appendChild(loadingDiv);
 
     this.updateCardContent(contentDiv);
     this.host.style.display = 'block';
+    this.positionNearRange(range);
   }
 
   /**
-   * 填充查词解析结果
+   * 填充查词解析结果 (纯 DOM 构建，兼容 YouTube TrustedTypes CSP)
    */
   public showResult(range: Range, result: WordLookupResult): void {
     this.currentResult = result;
-    this.positionNearRange(range);
 
     const card = document.createElement('div');
     card.className = 'card';
 
     const hasSentence = result.sentence && result.sentence !== result.word;
 
-    card.innerHTML = `
-      <div class="header">
-        <div>
-          <span class="word-title">${result.word}</span>
-          ${result.phonetic ? `<span class="phonetic">${result.phonetic}</span>` : ''}
-        </div>
-        <div class="actions">
-          <button class="icon-btn speak-btn" title="朗读真人原声">🔊</button>
-          <button class="icon-btn star-btn ${this.isSaved ? 'saved' : ''}" title="收藏到生词本">★</button>
-          <button class="icon-btn close-btn" title="关闭">✕</button>
-        </div>
-      </div>
+    const header = document.createElement('div');
+    header.className = 'header';
 
-      <div class="meaning-box">
-        <div class="meaning-text">${result.meaning}</div>
-      </div>
+    const titleWrap = document.createElement('div');
+    const wordTitle = document.createElement('span');
+    wordTitle.className = 'word-title';
+    wordTitle.textContent = result.word;
+    titleWrap.appendChild(wordTitle);
+    if (result.phonetic) {
+      const phoneticSpan = document.createElement('span');
+      phoneticSpan.className = 'phonetic';
+      phoneticSpan.textContent = result.phonetic;
+      titleWrap.appendChild(phoneticSpan);
+    }
 
-      ${hasSentence ? `
-        <div class="sentence-box">
-          <div class="sentence-source">“${result.sentence}”</div>
-          ${result.sentenceTranslation ? `<div class="sentence-target">${result.sentenceTranslation}</div>` : ''}
-        </div>
-      ` : ''}
+    const actions = document.createElement('div');
+    actions.className = 'actions';
 
-      <div class="footer">
-        <span class="tag">⚡ 极速语境词典</span>
-        <span>翻译王 TranslateKing</span>
-      </div>
-    `;
-
-    // 绑定发音
-    card.querySelector('.speak-btn')?.addEventListener('click', () => {
+    const speakBtn = document.createElement('button');
+    speakBtn.className = 'icon-btn speak-btn';
+    speakBtn.title = '朗读真人原声';
+    speakBtn.textContent = '🔊';
+    speakBtn.addEventListener('click', () => {
       this.speakWord(result.word);
     });
 
-    // 绑定生词收藏
-    const starBtn = card.querySelector('.star-btn') as HTMLElement;
-    starBtn?.addEventListener('click', () => {
+    const starBtn = document.createElement('button');
+    starBtn.className = `icon-btn star-btn${this.isSaved ? ' saved' : ''}`;
+    starBtn.title = '收藏到生词本';
+    starBtn.textContent = '★';
+    starBtn.addEventListener('click', () => {
       this.toggleSaveVocabulary(result, starBtn);
     });
 
-    // 绑定关闭
-    card.querySelector('.close-btn')?.addEventListener('click', () => this.hide());
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'icon-btn close-btn';
+    closeBtn.title = '关闭';
+    closeBtn.textContent = '✕';
+    closeBtn.addEventListener('click', () => this.hide());
+
+    actions.appendChild(speakBtn);
+    actions.appendChild(starBtn);
+    actions.appendChild(closeBtn);
+
+    header.appendChild(titleWrap);
+    header.appendChild(actions);
+    card.appendChild(header);
+
+    const cardBody = document.createElement('div');
+    cardBody.className = 'card-body';
+
+    const meaningBox = document.createElement('div');
+    meaningBox.className = 'meaning-box';
+    const meaningText = document.createElement('div');
+    meaningText.className = 'meaning-text';
+    meaningText.textContent = result.meaning;
+    meaningBox.appendChild(meaningText);
+    cardBody.appendChild(meaningBox);
+
+    if (hasSentence) {
+      const sentenceBox = document.createElement('div');
+      sentenceBox.className = 'sentence-box';
+      const sentenceSource = document.createElement('div');
+      sentenceSource.className = 'sentence-source';
+      sentenceSource.textContent = `“${result.sentence}”`;
+      sentenceBox.appendChild(sentenceSource);
+
+      if (result.sentenceTranslation) {
+        const sentenceTarget = document.createElement('div');
+        sentenceTarget.className = 'sentence-target';
+        sentenceTarget.textContent = result.sentenceTranslation;
+        sentenceBox.appendChild(sentenceTarget);
+      }
+      cardBody.appendChild(sentenceBox);
+    }
+
+    card.appendChild(cardBody);
+
+    const footer = document.createElement('div');
+    footer.className = 'footer';
+    const tag = document.createElement('span');
+    tag.className = 'tag';
+    tag.textContent = '⚡ 极速语境词典';
+    const brand = document.createElement('span');
+    brand.textContent = '翻译王 TranslateKing';
+    footer.appendChild(tag);
+    footer.appendChild(brand);
+    card.appendChild(footer);
 
     this.updateCardContent(card);
     this.host.style.display = 'block';
+    this.positionNearRange(range);
   }
 
   private updateCardContent(newContent: HTMLElement): void {
@@ -309,8 +381,10 @@ export class SelectionFloatingCard {
       }
     }
 
-    const CARD_WIDTH = 320;
-    const CARD_HEIGHT = 180;
+    const cardEl = this.shadow.querySelector('.card') as HTMLElement | null;
+    const measuredRect = cardEl?.getBoundingClientRect();
+    const cardWidth = measuredRect && measuredRect.width > 0 ? measuredRect.width : 340;
+    const cardHeight = measuredRect && measuredRect.height > 0 ? measuredRect.height : 240;
     const PADDING = 12;
 
     const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 1024;
@@ -319,17 +393,22 @@ export class SelectionFloatingCard {
     let left = rect.left;
     let top = rect.bottom + 8;
 
-    // 水平右侧越界反弹检测
-    if (left + CARD_WIDTH > viewportWidth - PADDING) {
-      left = Math.max(PADDING, viewportWidth - CARD_WIDTH - PADDING);
+    // 水平右侧与左侧越界钳制
+    if (left + cardWidth > viewportWidth - PADDING) {
+      left = Math.max(PADDING, viewportWidth - cardWidth - PADDING);
     }
     if (left < PADDING) {
       left = PADDING;
     }
 
-    // 垂直下方越界向上翻转
-    if (top + CARD_HEIGHT > viewportHeight - PADDING) {
-      top = Math.max(PADDING, rect.top - CARD_HEIGHT - 8);
+    // 垂直下方越界：若下方放不下，优先翻转到选区上方；若上方也放不下，严格钳制在视口安全区内
+    if (top + cardHeight > viewportHeight - PADDING) {
+      const aboveTop = rect.top - cardHeight - 8;
+      if (aboveTop >= PADDING) {
+        top = aboveTop;
+      } else {
+        top = Math.max(PADDING, viewportHeight - cardHeight - PADDING);
+      }
     }
     if (top < PADDING) {
       top = PADDING;

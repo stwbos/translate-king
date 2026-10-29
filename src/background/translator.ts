@@ -24,10 +24,42 @@ interface ProviderState {
 
 // 服务状态监控表
 const providerStates: Record<string, ProviderState> = {
+  ai: { name: 'AI 大模型专线 (DeepSeek/OpenAI)', failures: 0, cooldownUntil: 0, totalSuccess: 0 },
   microsoft: { name: 'Microsoft Edge 专线', failures: 0, cooldownUntil: 0, totalSuccess: 0 },
   google: { name: 'Google 官方浏览器专线', failures: 0, cooldownUntil: 0, totalSuccess: 0 },
   mymemory: { name: 'MyMemory 容灾备用通道', failures: 0, cooldownUntil: 0, totalSuccess: 0 }
 };
+
+interface UserServicePrefs {
+  provider: 'auto' | 'microsoft' | 'google' | 'deepseek' | 'openai';
+  aiApiKey: string;
+  aiApiUrl: string;
+  aiModel: string;
+}
+
+let servicePrefs: UserServicePrefs = {
+  provider: 'auto',
+  aiApiKey: '',
+  aiApiUrl: 'https://api.deepseek.com/v1/chat/completions',
+  aiModel: 'deepseek-chat'
+};
+
+if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+  chrome.storage.local.get(['translationProvider', 'aiApiKey', 'aiApiUrl', 'aiModel'], (res) => {
+    if (res.translationProvider) servicePrefs.provider = res.translationProvider;
+    if (res.aiApiKey) servicePrefs.aiApiKey = res.aiApiKey;
+    if (res.aiApiUrl) servicePrefs.aiApiUrl = res.aiApiUrl;
+    if (res.aiModel) servicePrefs.aiModel = res.aiModel;
+  });
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local') {
+      if (changes.translationProvider) servicePrefs.provider = changes.translationProvider.newValue || 'auto';
+      if (changes.aiApiKey) servicePrefs.aiApiKey = changes.aiApiKey.newValue || '';
+      if (changes.aiApiUrl) servicePrefs.aiApiUrl = changes.aiApiUrl.newValue || 'https://api.deepseek.com/v1/chat/completions';
+      if (changes.aiModel) servicePrefs.aiModel = changes.aiModel.newValue || 'deepseek-chat';
+    }
+  });
+}
 
 // 内存 LRU 级缓存
 const memoryCache = new Map<string, string>();
@@ -191,12 +223,74 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = 8000
 }
 
 // ----------------------------------------------------
+// Tier 0: AI 大模型批量翻译通道 (DeepSeek / OpenAI 兼容接口)
+// ----------------------------------------------------
+async function callAiModel(texts: string[], targetLang: TargetLanguage): Promise<string[]> {
+  const apiKey = servicePrefs.aiApiKey.trim();
+  if (!apiKey) {
+    throw new Error('未配置 AI API Key');
+  }
+
+  const endpoint =
+    servicePrefs.provider === 'deepseek'
+      ? 'https://api.deepseek.com/v1/chat/completions'
+      : servicePrefs.aiApiUrl.trim() || 'https://api.openai.com/v1/chat/completions';
+
+  const model =
+    servicePrefs.provider === 'deepseek'
+      ? servicePrefs.aiModel.trim() || 'deepseek-chat'
+      : servicePrefs.aiModel.trim() || 'gpt-4o-mini';
+
+  const response = await fetchWithTimeout(
+    endpoint,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0.2,
+        messages: [
+          {
+            role: 'system',
+            content: `You are a professional translator. Translate the JSON string array into ${targetLang}. Keep any <x0>...</x0> HTML tags and all \\n line breaks intact. Return ONLY a valid JSON array of strings with the exact same length.`
+          },
+          {
+            role: 'user',
+            content: JSON.stringify(texts)
+          }
+        ]
+      })
+    },
+    10000
+  );
+
+  if (!response.ok) {
+    throw new Error(`AI 接口响应 HTTP ${response.status}`);
+  }
+
+  const data = await response.json();
+  const content: string = data?.choices?.[0]?.message?.content || '';
+  const jsonMatch = content.match(/\[[\s\S]*\]/);
+  const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : content);
+
+  if (!Array.isArray(parsed) || parsed.length !== texts.length) {
+    throw new Error('AI 批量翻译数组长度不匹配');
+  }
+
+  return parsed.map((item, i) => (typeof item === 'string' && item.trim() ? item : texts[i]));
+}
+
+// ----------------------------------------------------
 // Tier 1: Microsoft Edge Batch NMT
 // ----------------------------------------------------
 async function callMicrosoft(texts: string[], targetLang: TargetLanguage): Promise<string[]> {
   const to = targetLang === 'zh-CN' ? 'zh-Hans' : targetLang === 'zh-TW' ? 'zh-Hant' : targetLang;
-  // 必须带 textType=html，原生识别与保留 <x0>...</x0> 等内联 XML/HTML 占位符，彻底解决富文本超链接保留问题
+  // 必须带 textType=html，原生识别与保留 <x0>...</x0> 等内联 XML/HTML 占位符，并将 \n 转为 <br> 以 100% 保持评论与段落换行排版
   const url = `https://edge.microsoft.com/translate/translatetext?to=${encodeURIComponent(to)}&textType=html&isEnterpriseClient=false`;
+  const htmlPayloads = texts.map((t) => t.replace(/\r?\n/g, '<br>'));
 
   const response = await fetchWithTimeout(url, {
     method: 'POST',
@@ -204,7 +298,7 @@ async function callMicrosoft(texts: string[], targetLang: TargetLanguage): Promi
       'Content-Type': 'application/json',
       'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 Edg/128.0.0.0'
     },
-    body: JSON.stringify(texts)
+    body: JSON.stringify(htmlPayloads)
   }, 8000);
 
   if (!response.ok) {
@@ -219,7 +313,11 @@ async function callMicrosoft(texts: string[], targetLang: TargetLanguage): Promi
     throw new Error('Microsoft 批量结果长度不一致');
   }
 
-  return data.map((item, i) => item.translations?.[0]?.text || texts[i]);
+  return data.map((item, i) => {
+    const raw = item.translations?.[0]?.text;
+    if (!raw) return texts[i];
+    return raw.replace(/<br\s*\/?>[ \t]*/gi, '\n');
+  });
 }
 
 // ----------------------------------------------------
@@ -227,8 +325,10 @@ async function callMicrosoft(texts: string[], targetLang: TargetLanguage): Promi
 // ----------------------------------------------------
 async function callGoogle(texts: string[], targetLang: TargetLanguage): Promise<string[]> {
   const url = `https://translate-pa.googleapis.com/v1/translateHtml?key=${GOOGLE_BROWSER_KEY}`;
-  // Google 官方 translateHtml 原生支持 HTML 标签，使用 <div> 包裹以完整保留 <x0>...</x0> 占位符
-  const wrapped = texts.map((t) => `<div>${t.replace(/&(?!#?\w+;)/g, '&amp;')}</div>`);
+  // Google 官方 translateHtml 原生支持 HTML 标签，使用 <div> 包裹并将 \n 转为 <br> 以完整保留 <x0>...</x0> 占位符与多行评论排版
+  const wrapped = texts.map(
+    (t) => `<div>${t.replace(/&(?!#?\w+;)/g, '&amp;').replace(/\r?\n/g, '<br>')}</div>`
+  );
 
   const response = await fetchWithTimeout(url, {
     method: 'POST',
@@ -251,11 +351,14 @@ async function callGoogle(texts: string[], targetLang: TargetLanguage): Promise<
   }
 
   return rawList.map((str, i) => {
-    // 还原 <div> 标签包裹内容
+    // 还原 <div> 标签包裹内容与 <br> 换行符
     const unwrapped = str.replace(/^<div(?:\s[^>]*)?>([\s\S]*)<\/div>$/i, '$1');
-    return unwrapped
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'") || texts[i];
+    return (
+      unwrapped
+        .replace(/<br\s*\/?>[ \t]*/gi, '\n')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'") || texts[i]
+    );
   });
 }
 
@@ -333,6 +436,46 @@ export async function translateBatch(
 
   let resolvedTranslations: string[] | null = null;
   const BATCH_SIZE = 25;
+
+  // --------------------------------------------------
+  // 阶梯 0：如果用户选择了 DeepSeek / OpenAI 且配置了 API Key，优先走 AI 大模型通道
+  // --------------------------------------------------
+  if (
+    (servicePrefs.provider === 'deepseek' || servicePrefs.provider === 'openai') &&
+    servicePrefs.aiApiKey.trim().length > 0 &&
+    isProviderAvailable('ai')
+  ) {
+    try {
+      const chunks: string[] = [];
+      for (let i = 0; i < missingTexts.length; i += 15) {
+        const chunk = missingTexts.slice(i, i + 15);
+        const translated = await callAiModel(chunk, targetLang);
+        chunks.push(...translated);
+      }
+      resolvedTranslations = chunks;
+      recordSuccess('ai');
+    } catch (err) {
+      recordFailure('ai', err);
+    }
+  }
+
+  // --------------------------------------------------
+  // 阶梯 0.5：如果用户显式指定优先使用 Google 翻译专线
+  // --------------------------------------------------
+  if (!resolvedTranslations && servicePrefs.provider === 'google' && isProviderAvailable('google')) {
+    try {
+      const chunks: string[] = [];
+      for (let i = 0; i < missingTexts.length; i += BATCH_SIZE) {
+        const chunk = missingTexts.slice(i, i + BATCH_SIZE);
+        const translated = await callGoogle(chunk, targetLang);
+        chunks.push(...translated);
+      }
+      resolvedTranslations = chunks;
+      recordSuccess('google');
+    } catch (err) {
+      recordFailure('google', err);
+    }
+  }
 
   // --------------------------------------------------
   // 阶梯 1：优先尝试 Microsoft Edge 批量专线 (若未熔断)

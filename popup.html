@@ -7,77 +7,195 @@
   <link rel="stylesheet" href="/src/popup/popup.css">
 </head>
 <body>
-  <div class="popup-container">
-    <header class="header">
-      <div class="brand">
-        <img src="/icons/icon-48.png" alt="Logo" class="logo">
-        <div>
-          <h1 class="title">翻译王</h1>
-          <span class="subtitle">全网双语对照，一秒读懂世界</span>
-        </div>
+  <div class="popup-shell">
+    <!-- 1. 顶部栏：品牌标识 + 右侧悬浮球开关 -->
+    <header class="top-bar">
+      <div class="brand-wrap">
+        <img src="/icons/icon-48.png" alt="Logo" class="brand-logo">
+        <span class="brand-name">翻译王</span>
+        <span class="status-pill" id="statusText">极速专线就绪</span>
       </div>
-      <span class="badge-tag">v1.0 开源版</span>
+      <label class="top-mode-toggle" title="在网页右侧显示快捷翻译悬浮球">
+        <span class="top-toggle-label">悬浮球</span>
+        <input type="checkbox" id="enableFloatingBall" class="ios-switch" checked>
+      </label>
     </header>
 
-    <div class="card main-action-card">
-      <div class="setting-row">
-        <label for="translationMode">网页翻译模式</label>
-        <select id="translationMode" class="lang-select">
-          <option value="replace">🇨🇳 纯中文直接替换 (0基础 · 含按钮无感浏览)</option>
-          <option value="bilingual" selected>🌐 双语对照伴读 (学英语 · 译文在下方)</option>
-        </select>
-      </div>
-
-      <div class="setting-row">
-        <label for="targetLang">目标译文语言</label>
-        <select id="targetLang" class="lang-select">
-          <option value="zh-CN" selected>简体中文 (zh-CN)</option>
-          <option value="zh-TW">繁体中文 (zh-TW)</option>
-          <option value="en">English (en)</option>
-          <option value="ja">日本語 (ja)</option>
-          <option value="ko">한국어 (ko)</option>
-          <option value="fr">Français (fr)</option>
-          <option value="de">Deutsch (de)</option>
-          <option value="es">Español (es)</option>
-          <option value="ru">Русский (ru)</option>
-        </select>
-      </div>
-
-      <div class="setting-row toggle-row">
-        <label for="enableSelection" class="toggle-label">
-          <span class="toggle-title">鼠标划词翻译 (中英双向)</span>
-          <span class="toggle-desc">划选中/英文词句即刻显示释义与语境</span>
-        </label>
-        <input type="checkbox" id="enableSelection" class="toggle-switch" checked>
-      </div>
-
-      <div id="ytNotice" class="yt-notice" style="display: none; background: rgba(234, 179, 8, 0.12); border: 1px solid rgba(234, 179, 8, 0.35); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; font-size: 12px; line-height: 1.5; color: #fef08a;">
-        <div style="font-weight: bold; margin-bottom: 2px; display: flex; align-items: center; gap: 4px;">
-          <span>🎬</span>
-          <span>YouTube 实时双语字幕引擎已就绪</span>
+    <main class="main-body">
+      <!-- 2. 源语言 → 目标语言 胶囊选择栏 (对标沉浸式翻译顶部双胶囊设计) -->
+      <div class="lang-pair-row">
+        <div class="lang-pill">
+          <select id="sourceLang" class="pill-select" title="源语言">
+            <option value="auto" selected>自动检测</option>
+            <option value="en">英语 (English)</option>
+            <option value="zh">中文 (Chinese)</option>
+            <option value="ja">日语 (日本語)</option>
+            <option value="ko">韩语 (한국어)</option>
+          </select>
+          <svg class="pill-chevron" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"/></svg>
         </div>
-        <div style="color: #cbd5e1; font-size: 11px;">
-          视频播放器右下角已挂载 <b style="color: #fef08a;">[双语 ON]</b> 按钮，支持鼠标悬停自动暂停查词。
+
+        <div class="lang-arrow" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+        </div>
+
+        <div class="lang-pill">
+          <select id="targetLang" class="pill-select" title="目标译文语言">
+            <option value="zh-CN" selected>简体中文</option>
+            <option value="zh-TW">繁体中文</option>
+            <option value="en">英语 (English)</option>
+            <option value="ja">日语 (日本語)</option>
+            <option value="ko">韩语 (한국어)</option>
+            <option value="fr">法语 (Français)</option>
+            <option value="de">德语 (Deutsch)</option>
+            <option value="es">西班牙语 (Español)</option>
+            <option value="ru">俄语 (Русский)</option>
+          </select>
+          <svg class="pill-chevron" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"/></svg>
         </div>
       </div>
 
-      <button id="toggleBtn" class="primary-btn">
-        <span class="btn-icon">⚡</span>
-        <span id="btnText">一键开启双语对照 (Alt+T)</span>
+      <!-- 3. 聚合配置分组卡片 (服务引擎 + 译文样式 + 自动翻译此网站) -->
+      <section class="group-card">
+        <div class="group-row">
+          <span class="row-label">翻译服务：</span>
+          <div class="row-control">
+            <span class="service-dot" id="serviceIconDot">⚡</span>
+            <select id="translationProvider" class="inline-select">
+              <option value="auto" selected>Microsoft + Google 极速双擎</option>
+              <option value="microsoft">Microsoft Edge 神经网络专线</option>
+              <option value="google">Google 官方浏览器专线</option>
+              <option value="deepseek">DeepSeek V3 大模型 (API)</option>
+              <option value="openai">OpenAI / 自定义兼容接口</option>
+            </select>
+            <svg class="row-chevron" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"/></svg>
+          </div>
+        </div>
+
+        <!-- AI API Key 折叠配置抽屉 -->
+        <div id="aiConfigBox" class="ai-drawer" style="display: none;">
+          <input id="aiApiKey" type="password" class="ai-input" placeholder="粘贴 API Key (sk-...) 自动保存" />
+          <div id="customOpenAiFields" style="display: none;">
+            <input id="aiApiUrl" type="text" class="ai-input" placeholder="接口地址 (默认 https://api.openai.com/v1/chat/completions)" />
+            <input id="aiModel" type="text" class="ai-input" placeholder="模型名称 (如 gpt-4o-mini / deepseek-chat)" />
+          </div>
+        </div>
+
+        <div class="group-row">
+          <span class="row-label">译文样式：</span>
+          <div class="row-control">
+            <select id="webTheme" class="inline-select">
+              <option value="default" selected>经典蓝框 (左侧边栏对照)</option>
+              <option value="clean">纯净无框 (与原文字体同色)</option>
+              <option value="underline">蓝色虚线 (精致下划线)</option>
+              <option value="mask">模糊遮罩 (悬停显现·练阅读)</option>
+            </select>
+            <svg class="row-chevron" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"/></svg>
+          </div>
+        </div>
+
+        <div class="group-row group-row-last">
+          <div class="row-label-with-tag">
+            <span>自动翻译此站</span>
+            <span class="domain-tag" id="currentDomainBadge">当前网页</span>
+          </div>
+          <input type="checkbox" id="autoTranslateSite" class="ios-switch">
+        </div>
+      </section>
+
+      <!-- 隐藏式模式 select，供兼容逻辑同步 -->
+      <select id="translationMode" style="display: none;">
+        <option value="bilingual" selected>bilingual</option>
+        <option value="replace">replace</option>
+      </select>
+
+      <!-- 4. 主操作栏：左侧「双语/纯中」模式方形切换键 + 右侧宽幅主翻译按钮 -->
+      <div class="cta-split-row">
+        <button id="modeQuickBtn" class="mode-square-btn" title="点击切换：双语对照 / 仅看译文(纯中替换)">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="3"/>
+            <path d="M7 8h4m-2-2v2m-1 0c0 2.5-1.5 4.5-3 5.5"/>
+            <path d="M8 11c.8 1 2 2 3 2.5"/>
+            <path d="M13 16l2.5-6 2.5 6"/>
+            <path d="M13.8 14h3.4"/>
+          </svg>
+          <span class="mode-mini-badge" id="modeMiniBadge">双语</span>
+        </button>
+
+        <button id="toggleBtn" class="primary-translate-btn">
+          <span id="btnText">翻译 (⌥+T)</span>
+        </button>
+      </div>
+
+      <!-- YouTube 视频专属状态横幅 (仅在 YouTube 页面自动浮现) -->
+      <div id="ytNotice" class="yt-banner" style="display: none;">
+        <span class="yt-dot"></span>
+        <span>YouTube 双语字幕已就绪 · 点击播放器右下角 <b>[双语 ON | ⚙]</b> 调样式/下字幕</span>
+      </div>
+
+      <!-- 交互抽屉 A：快捷文本互译面板 -->
+      <div id="textTranslateDrawer" class="tool-drawer" style="display: none;">
+        <div class="drawer-header">
+          <span>💬 快捷文本互译 (中英自动识别)</span>
+          <button id="closeTextDrawer" class="drawer-close">✕</button>
+        </div>
+        <textarea id="quickInputText" class="quick-textarea" rows="2" placeholder="输入或粘贴任意中/外文句子，按回车或点击翻译..."></textarea>
+        <div class="drawer-actions">
+          <button id="runQuickTranslateBtn" class="mini-primary-btn">立即翻译</button>
+        </div>
+        <div id="quickOutputText" class="quick-output" style="display: none;"></div>
+      </div>
+
+      <!-- 交互抽屉 B：我的生词本面板 -->
+      <div id="vocabDrawer" class="tool-drawer" style="display: none;">
+        <div class="drawer-header">
+          <span>📖 划词收藏生词本</span>
+          <button id="closeVocabDrawer" class="drawer-close">✕</button>
+        </div>
+        <div id="vocabListContainer" class="vocab-list"></div>
+      </div>
+
+      <!-- 5. 底部 2×2 快捷功能矩阵卡片 (完全对标沉浸式翻译 4 宫格卡片) -->
+      <div class="feature-grid">
+        <button id="openTextTranslateBtn" class="feature-card">
+          <span class="feature-icon-box">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M8 9h8M12 9v7"/></svg>
+          </span>
+          <span class="feature-text">文本翻译</span>
+        </button>
+
+        <button id="openVocabBtn" class="feature-card">
+          <span class="feature-icon-box">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>
+          </span>
+          <span class="feature-text">生词本 <small id="vocabCountBadge" class="count-tag">0</small></span>
+        </button>
+
+        <button id="hoverTranslateCardBtn" class="feature-card is-enabled" title="按住 Alt/Option 键将鼠标悬停在任意网页段落上即可单段双语翻译">
+          <span class="feature-icon-box">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m4 4 7.07 17 2.51-7.39L21 11.07z"/></svg>
+          </span>
+          <span class="feature-text">鼠标悬停 <small class="active-dot"></small></span>
+        </button>
+
+        <button id="selectionCardBtn" class="feature-card is-enabled" title="点击开关：鼠标选中查词 + 输入框连按3下空格翻译">
+          <input type="checkbox" id="enableSelection" checked style="display: none;">
+          <span class="feature-icon-box">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 4h1a3 3 0 0 1 3 3 3 3 0 0 1 3-3h1"/><path d="M13 20h-1a3 3 0 0 1-3-3 3 3 0 0 1-3 3H5"/><path d="M9 4v16"/></svg>
+          </span>
+          <span class="feature-text">划词翻译 <small id="selectionDot" class="active-dot"></small></span>
+        </button>
+      </div>
+    </main>
+
+    <!-- 6. 底部通栏状态与设置条 -->
+    <footer class="bottom-bar">
+      <button id="openAiSettingsBtn" class="footer-action" title="打开完整全屏设置中心 (options.html#general)">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        <span>设置</span>
       </button>
-
-      <div class="status-indicator">
-        <span class="dot"></span>
-        <span id="statusText">Microsoft 极速专线已就绪 (免配 Key)</span>
-      </div>
-    </div>
-
-    <footer class="footer">
-      <div class="footer-links">
-        <a href="https://github.com/stwbos/translate-king" target="_blank" class="footer-link">GitHub 源码</a>
-        <span>·</span>
-        <a href="https://stwbos.github.io/translate-king/privacy.html" target="_blank" class="footer-link">隐私政策</a>
-      </div>
+      <span class="version-text">V 1.3.0</span>
+      <a href="options.html#services" target="_blank" class="footer-action">翻译服务</a>
     </footer>
   </div>
 
