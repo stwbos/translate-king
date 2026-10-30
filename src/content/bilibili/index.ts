@@ -149,10 +149,10 @@ function mountBiliControlButton(targetLang: TargetLanguage): void {
       });
     });
 
-    // 挂载到控制条（尽量靠前或在 CC 字幕按钮左侧）
+    // 挂载到控制条（紧邻 CC 字幕按钮左侧）
     const subtitleCtrl = controlsRight.querySelector('.bpx-player-ctrl-subtitle');
-    if (subtitleCtrl && subtitleCtrl.parentNode === controlsRight) {
-      controlsRight.insertBefore(btn, subtitleCtrl);
+    if (subtitleCtrl && subtitleCtrl.parentNode) {
+      subtitleCtrl.parentNode.insertBefore(btn, subtitleCtrl);
     } else {
       controlsRight.insertBefore(btn, controlsRight.firstChild);
     }
@@ -175,6 +175,9 @@ export class BiliCaptionObserver {
   private pollInterval: ReturnType<typeof setInterval> | null = null;
   private unsubscribeConfig: (() => void) | null = null;
 
+  private hasAutoEnabledCc = false;
+  private lastAutoEnableAttempt = 0;
+
   constructor(targetLang: TargetLanguage = 'zh-CN') {
     this.targetLang = targetLang;
     this.unsubscribeConfig = onSubtitleConfigChange(() => {
@@ -194,8 +197,88 @@ export class BiliCaptionObserver {
   }
 
   public resetVideo(): void {
+    this.hasAutoEnabledCc = false;
+    this.lastAutoEnableAttempt = 0;
     this.lastProcessedText = '';
     this.removeInjectedLine();
+  }
+
+  /**
+   * 自动探测并开启 B站播放器中的 AI 中文字幕或第一个可用字幕
+   */
+  public ensureNativeCcEnabled(): boolean {
+    if (this.hasAutoEnabledCc) return true;
+    const now = Date.now();
+    if (now - this.lastAutoEnableAttempt < 1500) return false;
+    this.lastAutoEnableAttempt = now;
+
+    // 1. 若已有活动的字幕节点，说明已经开启，无需重复操作
+    const activeText = document.querySelector('.bpx-player-subtitle-panel-text, .bilibili-player-video-subtitle');
+    if (activeText && (activeText.textContent || '').trim().length > 0) {
+      this.hasAutoEnabledCc = true;
+      return true;
+    }
+
+    // 2. 检查当前菜单中是否存在激活的非关闭选项
+    const activeItem = document.querySelector(
+      '.bpx-player-ctrl-subtitle-language-item.bpx-state-active:not([data-lan="close"])'
+    );
+    if (activeItem) {
+      this.hasAutoEnabledCc = true;
+      return true;
+    }
+
+    // 3. 优先寻找中文 AI 字幕（如截图中的 中文 AI）或第一个有效语言项
+    const langItems = Array.from(
+      document.querySelectorAll<HTMLElement>(
+        '.bpx-player-ctrl-subtitle-language-item, .bpx-player-ctrl-subtitle-item'
+      )
+    );
+
+    const nonCloseItem = langItems.find((el) => {
+      const text = el.textContent || '';
+      const lan = el.getAttribute('data-lan') || '';
+      return !text.includes('关闭') && lan !== 'close';
+    });
+
+    if (nonCloseItem) {
+      // 优先选中文 AI 或中文项
+      const zhItem =
+        langItems.find((el) => {
+          const text = el.textContent || '';
+          const lan = el.getAttribute('data-lan') || '';
+          return (text.includes('中文') || lan.includes('zh')) && !text.includes('关闭');
+        }) || nonCloseItem;
+
+      zhItem.click();
+      this.hasAutoEnabledCc = true;
+      showBiliPlayerStatusToast('已自动开启 B站 AI字幕并转为双语翻译');
+      return true;
+    }
+
+    // 4. 若菜单尚未在 DOM 中渲染（B站默认按需生成），派发轻量 mouseenter 唤起菜单
+    const subtitleCtrl = document.querySelector<HTMLElement>('.bpx-player-ctrl-subtitle');
+    if (subtitleCtrl) {
+      subtitleCtrl.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+      setTimeout(() => {
+        const item = document.querySelector<HTMLElement>(
+          '.bpx-player-ctrl-subtitle-language-item:not([data-lan="close"])'
+        );
+        if (item) {
+          const zh =
+            Array.from(
+              document.querySelectorAll<HTMLElement>('.bpx-player-ctrl-subtitle-language-item')
+            ).find((el) => (el.textContent || '').includes('中文')) || item;
+          zh.click();
+          this.hasAutoEnabledCc = true;
+          showBiliPlayerStatusToast('已自动开启 B站 AI字幕并转为双语翻译');
+        }
+        subtitleCtrl.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }));
+      }, 150);
+      return true;
+    }
+
+    return false;
   }
 
   public start(): void {
@@ -208,6 +291,9 @@ export class BiliCaptionObserver {
       this.pollInterval = setInterval(() => {
         if (!this.isRunning) return;
         this.ensureObserverAttached();
+        if (!this.hasAutoEnabledCc) {
+          this.ensureNativeCcEnabled();
+        }
         this.processActiveCaptions();
         mountBiliControlButton(this.targetLang);
       }, 100);

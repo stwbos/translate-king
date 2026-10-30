@@ -137,4 +137,38 @@ describe('Bilibili Video Subtitle Observer Engine', () => {
 
     observer.stop();
   });
+
+  it('当 B站字幕当前处于“关闭”状态时能自动探测并激活“中文 AI”字幕', () => {
+    const ctrlWrap = doc.querySelector('.bpx-player-ctrl-subtitle')!;
+    const menuBox = doc.createElement('div');
+    menuBox.className = 'bpx-player-ctrl-subtitle-box';
+
+    const closeItem = doc.createElement('div');
+    closeItem.className = 'bpx-player-ctrl-subtitle-language-item bpx-state-active';
+    closeItem.textContent = '关闭';
+    closeItem.setAttribute('data-lan', 'close');
+    menuBox.appendChild(closeItem);
+
+    const zhAiItem = doc.createElement('div');
+    zhAiItem.className = 'bpx-player-ctrl-subtitle-language-item';
+    zhAiItem.textContent = '中文 AI';
+    zhAiItem.setAttribute('data-lan', 'ai-zh');
+    zhAiItem.addEventListener('click', () => {
+      closeItem.classList.remove('bpx-state-active');
+      zhAiItem.classList.add('bpx-state-active');
+    });
+    menuBox.appendChild(zhAiItem);
+
+    ctrlWrap.appendChild(menuBox);
+
+    const observer = new BiliCaptionObserver('ko');
+    expect(zhAiItem.classList.contains('bpx-state-active')).toBe(false);
+
+    observer.ensureNativeCcEnabled();
+
+    expect(zhAiItem.classList.contains('bpx-state-active')).toBe(true);
+    expect(closeItem.classList.contains('bpx-state-active')).toBe(false);
+
+    observer.stop();
+  });
 });
