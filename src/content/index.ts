@@ -11,7 +11,7 @@
  * 4. Alt+T 快捷键全局无损切换与即时原文还原
  */
 
-import { extractTranslatableBlocks, TranslatableBlock } from './dom/extractor';
+import { extractTranslatableBlocks, collectAllRoots, TranslatableBlock } from './dom/extractor';
 import { injectLoadingState, injectTranslation, removeTranslation, clearAllTranslations } from './dom/injector';
 import { partitionBlocksByViewport } from './dom/viewport';
 import { extractSentenceFromSelection, cleanWord } from './selection/sentence-extractor';
@@ -19,6 +19,7 @@ import { SelectionFloatingCard } from './selection/floating-card';
 import { TargetLanguage, TranslationMode, RuntimeMessage, TranslateBatchResponse } from '../types';
 import { WordLookupResult } from '../background/dictionary';
 import { setupYouTubeLifecycle } from './youtube';
+import { setupBilibiliLifecycle } from './bilibili';
 import { setupInteractiveShortcuts } from './input-translate';
 import {
   setupFloatingBall,
@@ -100,6 +101,7 @@ if (typeof chrome !== 'undefined' && chrome.storage?.local) {
       if (data.targetLang) {
         activeTargetLang = data.targetLang;
         setupYouTubeLifecycle(activeTargetLang);
+        setupBilibiliLifecycle(activeTargetLang);
       }
       if (typeof data.enableSelection === 'boolean') {
         enableSelection = data.enableSelection;
@@ -139,6 +141,7 @@ if (typeof chrome !== 'undefined' && chrome.storage?.local) {
         if (newLang) {
           activeTargetLang = newLang;
           setupYouTubeLifecycle(activeTargetLang);
+          setupBilibiliLifecycle(activeTargetLang);
         }
       }
       if (changes.enableSelection) {
@@ -165,8 +168,9 @@ if (typeof document !== 'undefined') {
   }
 }
 
-// 启动 YouTube 实时双语字幕引擎监听 (无条件顶层常驻)
+// 启动 YouTube 与 Bilibili 实时双语字幕引擎监听 (无条件顶层常驻)
 setupYouTubeLifecycle(activeTargetLang);
+setupBilibiliLifecycle(activeTargetLang);
 
 // 启动连按 3 次空格输入框翻译 & 按住 Alt 鼠标悬停单段即时翻译
 setupInteractiveShortcuts(() => activeTargetLang);
@@ -422,8 +426,36 @@ function processDynamicMutations(delay = 40): void {
   }, delay);
 }
 
+const observedShadowRoots = new Set<ShadowRoot>();
+let scrollThrottleTimer: ReturnType<typeof setTimeout> | null = null;
+
+function handlePassiveScroll(): void {
+  if (!isPageTranslated || !isExtensionValid()) return;
+  if (scrollThrottleTimer) return;
+  scrollThrottleTimer = setTimeout(() => {
+    scrollThrottleTimer = null;
+    if (!isPageTranslated || !isExtensionValid()) return;
+    // 检查是否有新挂载的 ShadowRoot (如 B站评论滚动到底部时新增的节点)
+    if (typeof document !== 'undefined') {
+      const allRoots = collectAllRoots(document);
+      for (const r of allRoots) {
+        if (r !== document && (r as any).host && mutationObserver) {
+          const s = r as ShadowRoot;
+          if (!observedShadowRoots.has(s)) {
+            observedShadowRoots.add(s);
+            try {
+              mutationObserver.observe(s, { childList: true, subtree: true });
+            } catch {}
+          }
+        }
+      }
+    }
+    processDynamicMutations(30);
+  }, 120);
+}
+
 /**
- * 启动动态内容观察器（应对 X/Twitter、Reddit、聊天私信等单页无限滚动流）
+ * 启动动态内容观察器（应对 X/Twitter、Reddit、B站评论、聊天私信等单页无限滚动流）
  */
 function startDynamicObserver(): void {
   if (mutationObserver || typeof MutationObserver === 'undefined') return;
@@ -454,6 +486,27 @@ function startDynamicObserver(): void {
             continue;
           }
           hasAddedNodes = true;
+
+          // 动态注册新产生的 ShadowRoot (如 B站楼层 <bili-comment-thread-renderer> 挂载)
+          if (el.shadowRoot && !observedShadowRoots.has(el.shadowRoot)) {
+            observedShadowRoots.add(el.shadowRoot);
+            try {
+              mutationObserver.observe(el.shadowRoot, { childList: true, subtree: true });
+            } catch {}
+          }
+          if (typeof el.querySelectorAll === 'function') {
+            const nested = el.querySelectorAll('*');
+            for (let j = 0; j < nested.length; j++) {
+              const sr = nested[j].shadowRoot;
+              if (sr && !observedShadowRoots.has(sr)) {
+                observedShadowRoots.add(sr);
+                try {
+                  mutationObserver.observe(sr, { childList: true, subtree: true });
+                } catch {}
+              }
+            }
+          }
+
           // 若变动节点与 X 私信/聊天气泡相关，标记高优先级极速上屏
           if (
             el.getAttribute?.('data-testid') === 'messageEntry' ||
@@ -483,12 +536,42 @@ function startDynamicObserver(): void {
       subtree: true
     });
   }
+
+  // 观察当前文档树中已存在的全部 ShadowRoot (如 B站初始评论组件)
+  if (typeof document !== 'undefined') {
+    const initialRoots = collectAllRoots(document);
+    for (const r of initialRoots) {
+      if (r !== document && (r as any).host) {
+        const shadow = r as ShadowRoot;
+        if (!observedShadowRoots.has(shadow)) {
+          observedShadowRoots.add(shadow);
+          try {
+            mutationObserver.observe(shadow, { childList: true, subtree: true });
+          } catch {}
+        }
+      }
+    }
+  }
+
+  // 注册全局被动滚动感知，在用户快速滚动列表时增量自愈
+  if (typeof window !== 'undefined') {
+    window.addEventListener('scroll', handlePassiveScroll, { passive: true });
+  }
 }
 
 /**
  * 停止动态内容观察器
  */
 function stopDynamicObserver(): void {
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('scroll', handlePassiveScroll);
+  }
+  if (scrollThrottleTimer) {
+    clearTimeout(scrollThrottleTimer);
+    scrollThrottleTimer = null;
+  }
+  observedShadowRoots.clear();
+
   if (mutationDebounceTimer) {
     clearTimeout(mutationDebounceTimer);
     mutationDebounceTimer = null;

@@ -2,11 +2,57 @@
  * 翻译王 (TranslateKing) - 译文渲染器 (支持双语对照与纯中文原地直接替换模式)
  */
 
-import { TranslatableBlock } from './extractor';
+import { TranslatableBlock, collectAllRoots } from './extractor';
 import { TranslationMode } from '../../types';
 
 const SHOW_TEXT_FILTER = typeof NodeFilter !== 'undefined' ? NodeFilter.SHOW_TEXT : 4;
 const savedOriginalNodesMap = new WeakMap<HTMLElement, Node[]>();
+
+/**
+ * 确保 Shadow DOM 内部挂载翻译王的核心样式表
+ */
+function ensureShadowStyles(shadow: ShadowRoot): void {
+  if (typeof shadow.getElementById === 'function' && shadow.getElementById('translate-king-shadow-styles')) return;
+  const doc = shadow.ownerDocument || (typeof document !== 'undefined' ? document : null);
+  if (!doc) return;
+  const style = doc.createElement('style');
+  style.id = 'translate-king-shadow-styles';
+  style.textContent = `
+    .translate-king-wrapper {
+      display: block !important;
+      margin-top: 6px !important;
+      margin-bottom: 4px !important;
+      line-height: 1.6 !important;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", Roboto, "Helvetica Neue", sans-serif !important;
+      user-select: text !important;
+      pointer-events: auto !important;
+    }
+    .translate-king-wrapper .translate-king-text {
+      display: inline-block !important;
+      font-size: 0.95em !important;
+      color: #2563eb !important;
+      letter-spacing: 0.02em !important;
+      background: rgba(37, 99, 235, 0.06) !important;
+      padding: 3px 8px !important;
+      border-radius: 4px !important;
+      border-left: 3px solid #3b82f6 !important;
+      word-break: break-word !important;
+      white-space: pre-line !important;
+    }
+    .translate-king-wrapper.translate-king-loading .translate-king-text {
+      opacity: 0.65 !important;
+      font-style: italic !important;
+    }
+    @media (prefers-color-scheme: dark) {
+      .translate-king-wrapper .translate-king-text {
+        color: #93c5fd !important;
+        background: rgba(147, 197, 253, 0.12) !important;
+        border-left-color: #60a5fa !important;
+      }
+    }
+  `;
+  shadow.appendChild(style);
+}
 
 /**
  * 安全定位承载有效非空文本的主 TextNode 节点（过滤纯空白字符节点）
@@ -253,6 +299,11 @@ export function injectLoadingState(
   block.element.setAttribute('data-tk-loading', String(Date.now()));
   block.element.appendChild(wrapper);
 
+  const rootNode = typeof block.element.getRootNode === 'function' ? block.element.getRootNode() : null;
+  if (rootNode && (rootNode as any).host && typeof (rootNode as any).getElementById === 'function') {
+    ensureShadowStyles(rootNode as ShadowRoot);
+  }
+
   return wrapper;
 }
 
@@ -425,27 +476,40 @@ export function injectTranslation(
   wrapper.appendChild(textNode);
   block.element.setAttribute('data-tk-translated', 'true');
   block.element.appendChild(wrapper);
+
+  const rootNode = typeof block.element.getRootNode === 'function' ? block.element.getRootNode() : null;
+  if (rootNode && (rootNode as any).host && typeof (rootNode as any).getElementById === 'function') {
+    ensureShadowStyles(rootNode as ShadowRoot);
+  }
 }
 
 /**
  * 全局清空所有已注入的译文容器，恢复 100% 纯净原文
  */
 export function clearAllTranslations(root: ParentNode = document): void {
-  // 1. 清除双语容器
-  const allWrappers = root.querySelectorAll('.translate-king-wrapper');
-  allWrappers.forEach((node) => node.remove());
+  const allRoots = collectAllRoots(root);
+  for (const r of allRoots) {
+    // 1. 清除双语容器
+    const allWrappers = r.querySelectorAll('.translate-king-wrapper');
+    allWrappers.forEach((node) => node.remove());
 
-  // 2. 还原直接替换过的文本
-  const allReplaced = root.querySelectorAll('[data-tk-replaced]');
-  allReplaced.forEach((el) => {
-    removeTranslation(el as HTMLElement);
-  });
+    // 2. 还原直接替换过的文本
+    const allReplaced = r.querySelectorAll('[data-tk-replaced]');
+    allReplaced.forEach((el) => {
+      removeTranslation(el as HTMLElement);
+    });
 
-  // 3. 清理标记
-  const allTagged = root.querySelectorAll('[data-tk-id], [data-tk-loading], [data-tk-translated]');
-  allTagged.forEach((node) => {
-    node.removeAttribute('data-tk-id');
-    node.removeAttribute('data-tk-loading');
-    node.removeAttribute('data-tk-translated');
-  });
+    // 3. 清理标记
+    const allTagged = r.querySelectorAll('[data-tk-id], [data-tk-loading], [data-tk-translated]');
+    allTagged.forEach((node) => {
+      node.removeAttribute('data-tk-id');
+      node.removeAttribute('data-tk-loading');
+      node.removeAttribute('data-tk-translated');
+    });
+
+    // 4. 清理 shadow style
+    if ((r as any).host && typeof (r as any).getElementById === 'function') {
+      (r as ShadowRoot).getElementById('translate-king-shadow-styles')?.remove();
+    }
+  }
 }

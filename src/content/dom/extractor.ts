@@ -27,7 +27,9 @@ function isInlineFormattingTag(el: HTMLElement): boolean {
     return (
       el.className.includes('attributed-string--bold') ||
       el.className.includes('attributed-string--italic') ||
-      el.className.includes('attributed-string--strikethrough')
+      el.className.includes('attributed-string--strikethrough') ||
+      el.className.includes('bili-rich-text-module') ||
+      el.className.includes('jump-op')
     );
   }
   return false;
@@ -39,8 +41,11 @@ function isInlineFormattingTag(el: HTMLElement): boolean {
 function isPreformattedOrCommentElement(el: HTMLElement): boolean {
   if (
     el.id === 'content-text' ||
+    el.id === 'contents' ||
     el.tagName === 'YT-ATTRIBUTED-STRING' ||
     el.tagName === 'YT-FORMATTED-STRING' ||
+    el.tagName === 'BILI-RICH-TEXT' ||
+    el.classList?.contains('bili-rich-text__content') ||
     el.querySelector?.('.yt-core-attributed-string--white-space-pre-wrap, [style*="pre-wrap"], [style*="pre-line"]')
   ) {
     return true;
@@ -48,7 +53,7 @@ function isPreformattedOrCommentElement(el: HTMLElement): boolean {
   if (
     typeof el.matches === 'function' &&
     el.matches(
-      '#content-text, [data-testid="tweetText"], [data-testid="UserDescription"], [data-testid="messageText"], [data-testid="postText"], [slot="comment"], [slot="text-body"]'
+      '#content-text, #contents, .bili-rich-text__content, [data-testid="tweetText"], [data-testid="UserDescription"], [data-testid="messageText"], [data-testid="postText"], [slot="comment"], [slot="text-body"]'
     )
   ) {
     return true;
@@ -56,7 +61,7 @@ function isPreformattedOrCommentElement(el: HTMLElement): boolean {
   if (
     typeof el.closest === 'function' &&
     el.closest(
-      '#content-text, [data-testid="tweetText"], [data-testid="UserDescription"], [data-testid="messageEntry"], shreddit-comment, shreddit-post'
+      '#content-text, [data-testid="tweetText"], [data-testid="UserDescription"], [data-testid="messageEntry"], shreddit-comment, shreddit-post, bili-rich-text, bili-comment-renderer, bili-comment-thread-renderer'
     )
   ) {
     return true;
@@ -124,6 +129,14 @@ export const ATOMIC_BLOCK_SELECTORS = [
   'shreddit-post [slot="text-body"]',
   'shreddit-comment [slot="comment"]',
   '#content-text',
+
+  // 1.1 Bilibili (哔哩哔哩) 评论区与动态富文本正文 (Shadow DOM 穿透精准匹配)
+  '#contents.bili-rich-text__content',
+  '.bili-rich-text__content',
+  'bili-rich-text #contents',
+  'bili-rich-text',
+  '.comment-content',
+  '.reply-content',
 
   // 2. X / Twitter 推荐卡片 (UserCell) 专用高精度抽取规则
   '[data-testid="UserCell"] [dir="auto"]',
@@ -315,6 +328,42 @@ function extractTwitterConversationRow(
 }
 
 /**
+ * 递归收集指定根节点及其下所有 Web Components 的 open ShadowRoot
+ * 确保对 Bilibili 评论区、Reddit 等复杂 Shadow DOM 架构进行 100% 穿透覆盖
+ */
+export function collectAllRoots(root: ParentNode = document): ParentNode[] {
+  const roots: ParentNode[] = [root];
+  const queue: ParentNode[] = [root];
+  const seen = new Set<ParentNode>([root]);
+
+  if ((root as any).shadowRoot && !seen.has((root as any).shadowRoot)) {
+    const s = (root as any).shadowRoot as ShadowRoot;
+    seen.add(s);
+    roots.push(s);
+    queue.push(s);
+  }
+
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    try {
+      const elements = current.querySelectorAll('*');
+      for (let i = 0; i < elements.length; i++) {
+        const shadow = elements[i].shadowRoot;
+        if (shadow && !seen.has(shadow)) {
+          seen.add(shadow);
+          roots.push(shadow);
+          queue.push(shadow);
+        }
+      }
+    } catch {
+      // 容错降级
+    }
+  }
+
+  return roots;
+}
+
+/**
  * 遍历 DOM 提取当前页面上承载语义的待翻译文本块
  * 采用“阶段0 Twitter私信专属引擎 + 阶段1 语义原子块优先 + 阶段2 通用叶子文本容器兜底”策略，达到 Google 翻译同款 100% 覆盖率
  */
@@ -324,95 +373,98 @@ export function extractTranslatableBlocks(
 ): TranslatableBlock[] {
   const blocks: TranslatableBlock[] = [];
   const processedElements = new Set<HTMLElement>();
+  const allRoots = collectAllRoots(root);
 
-  // ---------------------------------------------------------
-  // 阶段 0：X / Twitter 私信聊天 (Direct Messages & Conversations) 专用高鲁棒性提取引擎
-  // 覆盖全量消息容器：messageEntry、cellInnerDiv、DMConversation、DMChatTranscript、私信 Timeline
-  // 针对 X 聊天界面 React Native Web 结构进行专用解析，100% 捕获气泡文本，彻底排除操作按钮与时间戳
-  // ---------------------------------------------------------
-  try {
-    const chatCells = root.querySelectorAll<HTMLElement>(
-      [
-        '[data-testid="messageEntry"]',
-        '[data-testid="message-entry"]',
-        '[data-testid="DMConversation"] [data-testid="cellInnerDiv"]',
-        '[data-testid="DMChatTranscript"] [data-testid="cellInnerDiv"]',
-        '[data-testid="DMConversationBody"] [data-testid="cellInnerDiv"]',
-        '[data-testid="DMDrawer"] [data-testid="cellInnerDiv"]',
-        'div[aria-label*="Messages"] [data-testid="cellInnerDiv"]',
-        'div[aria-label*="私信"] [data-testid="cellInnerDiv"]',
-        'section[aria-label*="Messages"] [data-testid="cellInnerDiv"]',
-        'section[aria-label*="私信"] [data-testid="cellInnerDiv"]',
-        '[data-testid="DMConversation"] [role="row"]',
-        '[data-testid="DMChatTranscript"] [role="row"]'
-      ].join(',')
-    );
-    for (let i = 0; i < chatCells.length; i++) {
-      extractTwitterDmEntry(chatCells[i], blocks, processedElements);
-    }
-
-    const conversationRows = root.querySelectorAll<HTMLElement>(
-      '[data-testid="conversation"]'
-    );
-    for (let i = 0; i < conversationRows.length; i++) {
-      extractTwitterConversationRow(conversationRows[i], blocks, processedElements);
-    }
-  } catch {
-    // 容错降级
-  }
-
-  // ---------------------------------------------------------
-  // 阶段 1：提取语义优先的原子块 (Tweets, 文章段落, 标题, 按钮)
-  // 分块合并查询（每块 6 个选择器），杜绝任何浏览器对单个 CSS 选择器字符串长度的限制（如 2048 字符溢出）
-  // ---------------------------------------------------------
-  const CHUNK_SIZE = 6;
-  for (let i = 0; i < ATOMIC_BLOCK_SELECTORS.length; i += CHUNK_SIZE) {
-    const chunkSelector = ATOMIC_BLOCK_SELECTORS.slice(i, i + CHUNK_SIZE).join(',');
+  for (const currentRoot of allRoots) {
+    // ---------------------------------------------------------
+    // 阶段 0：X / Twitter 私信聊天 (Direct Messages & Conversations) 专用高鲁棒性提取引擎
+    // 覆盖全量消息容器：messageEntry、cellInnerDiv、DMConversation、DMChatTranscript、私信 Timeline
+    // 针对 X 聊天界面 React Native Web 结构进行专用解析，100% 捕获气泡文本，彻底排除操作按钮与时间戳
+    // ---------------------------------------------------------
     try {
-      const atomicElements = root.querySelectorAll<HTMLElement>(chunkSelector);
-      for (let j = 0; j < atomicElements.length; j++) {
-        processElement(atomicElements[j], blocks, processedElements, targetLang);
+      const chatCells = currentRoot.querySelectorAll<HTMLElement>(
+        [
+          '[data-testid="messageEntry"]',
+          '[data-testid="message-entry"]',
+          '[data-testid="DMConversation"] [data-testid="cellInnerDiv"]',
+          '[data-testid="DMChatTranscript"] [data-testid="cellInnerDiv"]',
+          '[data-testid="DMConversationBody"] [data-testid="cellInnerDiv"]',
+          '[data-testid="DMDrawer"] [data-testid="cellInnerDiv"]',
+          'div[aria-label*="Messages"] [data-testid="cellInnerDiv"]',
+          'div[aria-label*="私信"] [data-testid="cellInnerDiv"]',
+          'section[aria-label*="Messages"] [data-testid="cellInnerDiv"]',
+          'section[aria-label*="私信"] [data-testid="cellInnerDiv"]',
+          '[data-testid="DMConversation"] [role="row"]',
+          '[data-testid="DMChatTranscript"] [role="row"]'
+        ].join(',')
+      );
+      for (let i = 0; i < chatCells.length; i++) {
+        extractTwitterDmEntry(chatCells[i], blocks, processedElements);
+      }
+
+      const conversationRows = currentRoot.querySelectorAll<HTMLElement>(
+        '[data-testid="conversation"]'
+      );
+      for (let i = 0; i < conversationRows.length; i++) {
+        extractTwitterConversationRow(conversationRows[i], blocks, processedElements);
       }
     } catch {
       // 容错降级
     }
-  }
 
-  // ---------------------------------------------------------
-  // 阶段 2：通用叶子文本容器兜底扫描 (实现 Google 翻译的全面覆盖)
-  // 捕获所有不在原子选择器中的简介、趋势话题、人名、社交说明、标签页
-  // ---------------------------------------------------------
-  const candidateLeafs = Array.from(
-    root.querySelectorAll<HTMLElement>(
-      'div, li, td, th, dt, dd, a, span'
-    )
-  );
-
-  for (const el of candidateLeafs) {
-    if (processedElements.has(el)) continue;
-    if (isElementEffectivelyTranslated(el)) continue;
-    if (shouldIgnoreElement(el)) continue;
-
-    // 若 el 内部包含其他块级容器或已标记/翻译的子块，则说明它是外层布局容器，绝不能整体提取
-    if (
-      typeof el.querySelector === 'function' &&
-      (el.querySelector(CHILD_BLOCK_SELECTOR) || el.querySelector('.translate-king-wrapper, [data-tk-replaced]'))
-    ) {
-      continue;
+    // ---------------------------------------------------------
+    // 阶段 1：提取语义优先的原子块 (Tweets, Bilibili评论, 文章段落, 标题, 按钮)
+    // 分块合并查询（每块 6 个选择器），杜绝任何浏览器对单个 CSS 选择器字符串长度的限制（如 2048 字符溢出）
+    // ---------------------------------------------------------
+    const CHUNK_SIZE = 6;
+    for (let i = 0; i < ATOMIC_BLOCK_SELECTORS.length; i += CHUNK_SIZE) {
+      const chunkSelector = ATOMIC_BLOCK_SELECTORS.slice(i, i + CHUNK_SIZE).join(',');
+      try {
+        const atomicElements = currentRoot.querySelectorAll<HTMLElement>(chunkSelector);
+        for (let j = 0; j < atomicElements.length; j++) {
+          processElement(atomicElements[j], blocks, processedElements, targetLang);
+        }
+      } catch {
+        // 容错降级
+      }
     }
 
-    // 若 el 是 span 或 a，且其直接父级 div/li 也是叶子容器，则跳过子级，让父级整体提取整句
-    if (
-      (el.tagName === 'SPAN' || el.tagName === 'A') &&
-      el.parentElement &&
-      typeof el.parentElement.querySelector === 'function' &&
-      !el.parentElement.querySelector(CHILD_BLOCK_SELECTOR) &&
-      !el.parentElement.querySelector('.translate-king-wrapper, [data-tk-replaced]')
-    ) {
-      continue;
-    }
+    // ---------------------------------------------------------
+    // 阶段 2：通用叶子文本容器兜底扫描 (实现 Google 翻译的全面覆盖)
+    // 捕获所有不在原子选择器中的简介、趋势话题、人名、社交说明、标签页
+    // ---------------------------------------------------------
+    const candidateLeafs = Array.from(
+      currentRoot.querySelectorAll<HTMLElement>(
+        'div, li, td, th, dt, dd, a, span'
+      )
+    );
 
-    processElement(el, blocks, processedElements, targetLang);
+    for (const el of candidateLeafs) {
+      if (processedElements.has(el)) continue;
+      if (isElementEffectivelyTranslated(el)) continue;
+      if (shouldIgnoreElement(el)) continue;
+
+      // 若 el 内部包含其他块级容器或已标记/翻译的子块，则说明它是外层布局容器，绝不能整体提取
+      if (
+        typeof el.querySelector === 'function' &&
+        (el.querySelector(CHILD_BLOCK_SELECTOR) || el.querySelector('.translate-king-wrapper, [data-tk-replaced]'))
+      ) {
+        continue;
+      }
+
+      // 若 el 是 span 或 a，且其直接父级 div/li 也是叶子容器，则跳过子级，让父级整体提取整句
+      if (
+        (el.tagName === 'SPAN' || el.tagName === 'A') &&
+        el.parentElement &&
+        typeof el.parentElement.querySelector === 'function' &&
+        !el.parentElement.querySelector(CHILD_BLOCK_SELECTOR) &&
+        !el.parentElement.querySelector('.translate-king-wrapper, [data-tk-replaced]')
+      ) {
+        continue;
+      }
+
+      processElement(el, blocks, processedElements, targetLang);
+    }
   }
 
   return blocks;
@@ -457,6 +509,9 @@ function processElement(
       const isEmoji =
         src.includes('/emoji/') ||
         src.includes('twemoji') ||
+        src.includes('hdslb.com/bfs/emote') ||
+        src.includes('garb/') ||
+        img.classList.contains('bili-rich-text-emoji') ||
         img.classList.contains('r-4qtqp9') ||
         /\p{Emoji}/u.test(alt);
       if (isEmoji && alt && typeof (img as any).replaceWith === 'function') {

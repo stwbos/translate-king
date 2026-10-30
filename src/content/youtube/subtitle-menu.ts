@@ -111,7 +111,9 @@ export function toggleSubtitleSettingsMenu(callbacks: {
     return;
   }
 
-  const player = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
+  const player =
+    document.getElementById('movie_player') ||
+    document.querySelector('.html5-video-player, .bpx-player-container, #bilibili-player, .bilibili-player-video');
   if (!player) return;
 
   const menu = document.createElement('div');
