@@ -66,7 +66,18 @@ const PLAYER_SUBTITLE_SELECTORS = [
   '#metadata-line',
   'ytd-channel-name',
   '#author-text',
-  '#vote-count-middle'
+  '#vote-count-middle',
+  '.bpx-player-container',
+  '.bpx-player-control-entity',
+  '.bpx-player-control-bottom',
+  '.bpx-player-control-bottom-right',
+  '.bpx-player-control-bottom-left',
+  '.bpx-player-control-top',
+  '.bpx-player-subtitle-panel',
+  '.bili-subtitle-x-subtitle-panel',
+  '.translate-king-bili-control-btn',
+  '#translate-king-bili-subtitle-line',
+  '#translate-king-bili-toast'
 ].join(',');
 
 /**

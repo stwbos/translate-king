@@ -131,6 +131,8 @@ export const ATOMIC_BLOCK_SELECTORS = [
   '#content-text',
 
   // 1.1 Bilibili (哔哩哔哩) 评论区与动态富文本正文 (Shadow DOM 穿透精准匹配)
+  '#contents',
+  'p#contents',
   '#contents.bili-rich-text__content',
   '.bili-rich-text__content',
   'bili-rich-text #contents',
@@ -435,7 +437,7 @@ export function extractTranslatableBlocks(
     // ---------------------------------------------------------
     const candidateLeafs = Array.from(
       currentRoot.querySelectorAll<HTMLElement>(
-        'div, li, td, th, dt, dd, a, span'
+        'p, div, li, td, th, dt, dd, a, span'
       )
     );
 

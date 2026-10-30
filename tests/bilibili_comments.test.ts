@@ -130,4 +130,33 @@ describe('Bilibili Comments & Nested Shadow DOM Extraction', () => {
     expect(blocks[0].originalText).toBe('这个视频解释了为什么学编程需要高数');
     expect(blocks[1].originalText).toBe('确实，线性代数也很重要');
   });
+
+  it('能精准提取现代 B站真实 DOM: <p id="contents"> 无任何 class 且包含内联子节点', () => {
+    const app = doc.getElementById('app')!;
+    const biliComments = doc.createElement('bili-comments');
+    app.appendChild(biliComments);
+
+    const s1 = biliComments.attachShadow({ mode: 'open' });
+    const richText = doc.createElement('bili-rich-text');
+    s1.appendChild(richText);
+
+    const s2 = richText.attachShadow({ mode: 'open' });
+    // 现代真实 B站 DOM：p 标签，无 bili-rich-text__content class
+    const pContents = doc.createElement('p');
+    pContents.id = 'contents';
+    pContents.innerHTML = '点击蓝色链接领取学习资料 👈👈👈<a href="https://example.com">免费获取完整资料</a>';
+    s2.appendChild(pContents);
+
+    const blocks = extractTranslatableBlocks(doc, 'ko');
+    expect(blocks.length).toBe(1);
+    expect(blocks[0].element.id).toBe('contents');
+    expect(blocks[0].originalText).toContain('点击蓝色链接领取学习资料');
+
+    // 验证注入韩文
+    injectTranslation(blocks[0], '파란색 링크를 클릭하여 학습 자료를 받으세요 <x0>무료로 전체 자료 받기</x0>', 'bilingual');
+    const wrapper = s2.querySelector('.translate-king-wrapper');
+    expect(wrapper).not.toBeNull();
+    expect(wrapper?.textContent).toContain('파란색 링크를 클릭하여');
+    expect(s2.getElementById('translate-king-shadow-styles')).not.toBeNull();
+  });
 });

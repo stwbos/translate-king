@@ -616,6 +616,8 @@ async function translateFullPage(
     }
     activeTargetLang = targetLang;
     activeTranslationMode = mode;
+    setupYouTubeLifecycle(activeTargetLang);
+    setupBilibiliLifecycle(activeTargetLang);
 
     const blocks = extractTranslatableBlocks(document, activeTargetLang);
     if (blocks.length === 0) {
@@ -728,7 +730,12 @@ export function togglePageTranslation(
   // 如果之前标记为已翻译，但页面实际上没有任何译文（例如页面放置很久后被单页框架重新渲染回英文、或初次翻译未成功上屏）
   // 则绝不执行“还原原文”，而是强制复位状态并立即重新触发全页翻译！
   if (isPageTranslated && activeTranslationCount > 0) {
-    restoreOriginalPage();
+    if (targetLang && targetLang !== activeTargetLang) {
+      restoreOriginalPage();
+      translateFullPage(targetLang, mode, true);
+    } else {
+      restoreOriginalPage();
+    }
   } else {
     isPageTranslated = false;
     isTranslating = false; // 强制解除任何陈旧挂起锁

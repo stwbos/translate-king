@@ -44,7 +44,9 @@ describe('Bilibili Video Subtitle Observer Engine', () => {
       runtime: {
         lastError: null,
         sendMessage: vi.fn((msg, cb) => {
-          if (msg.type === 'TRANSLATE_TEXT') {
+          if (msg.type === 'TRANSLATE_BATCH') {
+            cb({ translations: msg.texts.map((t: string) => `[KO] ${t}`) });
+          } else if (msg.type === 'TRANSLATE_TEXT') {
             cb({ translation: `[KO] ${msg.text}` });
           }
         })
@@ -168,6 +170,40 @@ describe('Bilibili Video Subtitle Observer Engine', () => {
 
     expect(zhAiItem.classList.contains('bpx-state-active')).toBe(true);
     expect(closeItem.classList.contains('bpx-state-active')).toBe(false);
+
+    observer.stop();
+  });
+
+  it('能检测并实时翻译现代 B站 .bili-subtitle-x-subtitle-panel-text 节点并渲染双语字幕', async () => {
+    // 构造现代 B站 DOM 结构
+    const container = doc.querySelector('.bpx-player-container')!;
+    const modernWrap = doc.createElement('div');
+    modernWrap.className = 'bili-subtitle-x-subtitle-panel-wrap';
+    const modernPosition = doc.createElement('div');
+    modernPosition.className = 'bili-subtitle-x-subtitle-panel-position';
+    const modernText = doc.createElement('div');
+    modernText.className = 'bili-subtitle-x-subtitle-panel-text';
+    modernPosition.appendChild(modernText);
+    modernWrap.appendChild(modernPosition);
+    container.appendChild(modernWrap);
+
+    // 移除旧的 text 节点确保测试只命中现代节点
+    doc.querySelector('.bpx-player-subtitle-panel-text')?.remove();
+
+    const observer = new BiliCaptionObserver('ko');
+    observer.start();
+
+    modernText.textContent = '现代神经网络的注意力机制解析';
+    observer.processActiveCaptions();
+
+    await new Promise((r) => setTimeout(r, 20));
+
+    const line = doc.getElementById('translate-king-bili-subtitle-line');
+    expect(line).not.toBeNull();
+
+    const transSpan = line?.querySelector('.translate-king-bili-trans-text');
+    expect(transSpan).not.toBeNull();
+    expect(transSpan?.textContent).toBe('[KO] 现代神经网络的注意力机制解析');
 
     observer.stop();
   });

@@ -20,6 +20,21 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
     return true; // 声明异步响应通道
   }
 
+  if ((message as any).type === 'TRANSLATE_TEXT') {
+    const msg = message as any;
+    translateBatch([msg.text], msg.toLang)
+      .then((res) => {
+        sendResponse({ translation: res.translations?.[0] || msg.text });
+      })
+      .catch((err) => {
+        sendResponse({
+          translation: msg.text,
+          error: err instanceof Error ? err.message : String(err)
+        });
+      });
+    return true;
+  }
+
   if (message.type === 'GET_GATEWAY_HEALTH') {
     sendResponse(getGatewayHealthStatus());
     return false;
