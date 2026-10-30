@@ -43,6 +43,12 @@ export class SubtitleScheduler {
     this.currentEpoch++;
     this.cues = cues.sort((a, b) => a.startMs - b.startMs);
     if (targetLang) {
+      if (this.targetLang !== targetLang) {
+        this.translationCache.clear();
+        for (const cue of this.cues) {
+          delete cue.translatedText;
+        }
+      }
       this.targetLang = targetLang;
     }
     this.activeCue = null;

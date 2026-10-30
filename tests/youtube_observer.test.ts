@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { NativeCaptionObserver } from '../src/content/youtube/native-observer';
-import { ensurePlayerMounted } from '../src/content/youtube/index';
+import { ensurePlayerMounted, resetYouTubeModuleState } from '../src/content/youtube/index';
 import { updateSubtitleConfig, DEFAULT_YT_SUBTITLE_CONFIG } from '../src/content/youtube/subtitle-menu';
-import { groupCuesIntoSections, mergeCuesIntoTranscriptParagraphs, YouTubeSummaryPanel } from '../src/content/youtube/summary-panel';
+import { groupCuesIntoSections, mergeCuesIntoTranscriptParagraphs, YouTubeSummaryPanel, clearAllSharedVideoCues } from '../src/content/youtube/summary-panel';
 import { extractCaptionTracksFromDom, parseSubtitlePayload } from '../src/content/youtube/extractor';
 
 describe('YouTube 原生字幕双语原位注入引擎 (NativeCaptionObserver)', () => {
@@ -11,6 +11,8 @@ describe('YouTube 原生字幕双语原位注入引擎 (NativeCaptionObserver)',
   let captionWindow: HTMLElement;
 
   beforeEach(() => {
+    resetYouTubeModuleState();
+    clearAllSharedVideoCues();
     document.body.innerHTML = `
       <div id="movie_player">
         <video src="test.mp4"></video>
@@ -47,6 +49,7 @@ describe('YouTube 原生字幕双语原位注入引擎 (NativeCaptionObserver)',
   });
 
   afterEach(() => {
+    resetYouTubeModuleState();
     vi.restoreAllMocks();
   });
 
@@ -382,6 +385,89 @@ describe('YouTube 原生字幕双语原位注入引擎 (NativeCaptionObserver)',
     const transSpan = line.querySelector('.translate-king-trans-text') as HTMLElement;
     expect(transSpan.textContent).toBe('你好世界');
 
+    observer.stop();
+  });
+
+  it('0ms 初始渲染零空白保证：异步翻译网络请求期间绝不提前隐藏原生字幕，待译文就绪后再无缝挂载', async () => {
+    let resolveTranslation: (value: any) => void;
+    const delayedPromise = new Promise((resolve) => {
+      resolveTranslation = resolve;
+    });
+
+    (global as any).chrome.runtime.sendMessage = vi.fn((msg, cb) => {
+      if (msg.type === 'TRANSLATE_BATCH') {
+        delayedPromise.then(() => {
+          cb({ translations: ['你好，世界！'] });
+        });
+      }
+    });
+
+    const observer = new NativeCaptionObserver('zh-CN');
+    observer.start();
+    observer.processActiveCaptions();
+
+    // 此时网络翻译尚在飞行中 (Pending)：
+    // 原生字幕段绝不能被设置 display: none！严防首帧黑屏空白！
+    const nativeSeg = captionWindow.querySelector('.ytp-caption-segment') as HTMLElement;
+    expect(nativeSeg.style.display).not.toBe('none');
+    expect(captionWindow.classList.contains('translate-king-rollup-takeover')).toBe(false);
+
+    // 模拟网络翻译成功返回
+    resolveTranslation!({});
+    await new Promise((r) => setTimeout(r, 60));
+
+    // 译文成功上屏
+    const transText = captionWindow.querySelector('.translate-king-trans-text');
+    expect(transText?.textContent).toBe('你好，世界！');
+
+    observer.stop();
+  });
+
+  it('字幕设置菜单中包含目标语言选择器，支持实时切换至日文/韩文且彻底清空旧语言缓存', async () => {
+    const observer = new NativeCaptionObserver('zh-CN');
+    observer.start();
+
+    // 初始 zh-CN 翻译
+    observer.processActiveCaptions();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(captionWindow.querySelector('.translate-king-trans-text')?.textContent).toBe('你好世界');
+
+    // 模拟点击齿轮打开设置菜单
+    const rightControls = document.createElement('div');
+    rightControls.className = 'ytp-right-controls';
+    player.appendChild(rightControls);
+    ensurePlayerMounted();
+
+    const gear = document.querySelector('[data-tk-role="settings-trigger"]') as HTMLElement;
+    expect(gear).not.toBeNull();
+    gear.click();
+
+    const menu = document.getElementById('translate-king-yt-subtitle-menu')!;
+    expect(menu).not.toBeNull();
+
+    // 验证菜单中包含语言选择器下拉框和快速药丸
+    const langSelect = menu.querySelector('select') as HTMLSelectElement;
+    expect(langSelect).not.toBeNull();
+    const options = Array.from(langSelect.options).map((o) => o.value);
+    expect(options).toContain('zh-CN');
+    expect(options).toContain('ko');
+    expect(options).toContain('ja');
+    expect(options).toContain('en');
+
+    // 模拟韩语翻译返回
+    (global as any).chrome.runtime.sendMessage = vi.fn((msg, cb) => {
+      if (msg.type === 'TRANSLATE_BATCH' && msg.toLang === 'ko') {
+        cb({ translations: ['안녕하세요 세계'] });
+      }
+    });
+
+    // 切换至韩语 (ko)
+    observer.setTargetLang('ko');
+    expect(observer.getTranslationCache().size).toBe(0); // 旧语言缓存必须被清空！
+
+    await new Promise((r) => setTimeout(r, 60));
+
+    expect(captionWindow.querySelector('.translate-king-trans-text')?.textContent).toBe('안녕하세요 세계');
     observer.stop();
   });
 });

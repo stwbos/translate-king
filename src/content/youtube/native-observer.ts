@@ -11,7 +11,7 @@
  */
 
 import { cleanRawText } from './extractor';
-import { getSharedVideoCues, preloadSharedVideoCues } from './summary-panel';
+import { clearSharedCueTranslations, getSharedVideoCues, preloadSharedVideoCues } from './summary-panel';
 import { getSubtitleConfig, onSubtitleConfigChange } from './subtitle-menu';
 import { SubtitleScheduler } from './scheduler';
 import { SubtitleCue } from './types';
@@ -60,8 +60,17 @@ export class NativeCaptionObserver {
   }
 
   public setTargetLang(lang: TargetLanguage): void {
-    this.targetLang = lang;
-    this.scheduler.loadCues(this.scheduler.getCues(), lang);
+    if (this.targetLang !== lang) {
+      this.targetLang = lang;
+      this.translationCache.clear();
+      this.lastProcessedText = '';
+      this.lastTranslatedText = '';
+      this.lastMatchedRollupCue = null;
+      clearSharedCueTranslations();
+      this.scheduler.loadCues(this.scheduler.getCues(), lang);
+      this.removeInjectedLines();
+      this.processActiveCaptions();
+    }
   }
 
   public resetVideo(): void {
@@ -309,6 +318,7 @@ export class NativeCaptionObserver {
 
   /**
    * 根据「双语对照 / 仅看译文」或「ASR 整句接管模式」控制原生逐词英文字幕的显隐
+   * 核心防闪烁/零空白保证：译文未就绪前 (hasActiveTrans === false)，绝不提前隐藏原生字幕！
    */
   private syncNativeSegmentVisibility(
     captionWindow: HTMLElement,
@@ -316,10 +326,14 @@ export class NativeCaptionObserver {
     forceHideNative = false
   ): void {
     const cfg = getSubtitleConfig();
-    const hideByMode = this.isRunning && cfg.displayMode === 'translation-only';
-    const hideNative = this.isRunning && (forceHideNative || hideByMode);
+    const hasActiveTrans = Boolean(captionWindow.querySelector('.translate-king-trans-text')?.textContent?.trim());
+    const hideByMode = this.isRunning && cfg.displayMode === 'translation-only' && hasActiveTrans;
+    const hideNative = this.isRunning && ((forceHideNative && hasActiveTrans) || hideByMode);
 
-    captionWindow.classList.toggle('translate-king-rollup-takeover', Boolean(this.isRunning && forceHideNative));
+    captionWindow.classList.toggle(
+      'translate-king-rollup-takeover',
+      Boolean(this.isRunning && forceHideNative && hasActiveTrans)
+    );
     captionWindow.classList.toggle('translate-king-hide-native', Boolean(hideByMode));
 
     for (const seg of origSegments) {
@@ -441,7 +455,6 @@ export class NativeCaptionObserver {
     // 隐藏逐词蹦出的原生碎片，直接渲染完整英文长句 + 完整中文译文（与沉浸式翻译体验一致）！
     if (isRollup && matchedCue) {
       this.lastMatchedRollupCue = matchedCue;
-      this.syncNativeSegmentVisibility(captionWindow, origSegments, true);
       const fullSentence = matchedCue.originalText;
       const cachedTrans =
         matchedCue.translatedText || this.translationCache.get(fullSentence) || '';
@@ -452,8 +465,12 @@ export class NativeCaptionObserver {
         this.lastProcessedText = fullSentence;
         this.lastTranslatedText = cachedTrans;
         this.injectTranslationLine(captionWindow, cachedTrans, origSegments[0], fullSentence);
+        this.syncNativeSegmentVisibility(captionWindow, origSegments, true);
         return;
       }
+
+      // 译文尚未就绪：绝不提前隐藏原生字幕！确保用户从第 0 毫秒即可看到原本字幕！
+      this.syncNativeSegmentVisibility(captionWindow, origSegments, false);
 
       if (fullSentence === this.lastProcessedText) {
         return;
@@ -470,6 +487,7 @@ export class NativeCaptionObserver {
           if (currentWindow) {
             const currentSegs = this.getNativeSegments(currentWindow);
             this.injectTranslationLine(currentWindow, trans, currentSegs[0], fullSentence);
+            this.syncNativeSegmentVisibility(currentWindow, currentSegs, true);
           }
         }
       });

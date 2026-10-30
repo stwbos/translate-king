@@ -11,8 +11,11 @@
  * 7. 一键下载当前视频双语 .SRT 字幕文件 / 带时间戳 .TXT 字幕文稿 / 唤起视频总结面板
  */
 
+import { TargetLanguage } from '../../types';
+
 export interface YouTubeSubtitleStyleConfig {
   enabled: boolean;
+  targetLang?: TargetLanguage;
   displayMode: 'bilingual' | 'translation-only';
   position: 'bottom' | 'top';
   fontScale: number; // 0.8 | 1.0 | 1.2 | 1.45
@@ -24,6 +27,7 @@ export interface YouTubeSubtitleStyleConfig {
 
 export const DEFAULT_YT_SUBTITLE_CONFIG: YouTubeSubtitleStyleConfig = {
   enabled: true,
+  targetLang: 'zh-CN',
   displayMode: 'bilingual',
   position: 'bottom',
   fontScale: 1.0,
@@ -41,13 +45,30 @@ const listeners = new Set<(cfg: YouTubeSubtitleStyleConfig) => void>();
  */
 export function initSubtitleConfig(): void {
   if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-    chrome.storage.local.get(['ytSubtitleConfig'], (res) => {
+    chrome.storage.local.get(['ytSubtitleConfig', 'targetLang'], (res) => {
       if (res?.ytSubtitleConfig) {
         currentConfig = { ...DEFAULT_YT_SUBTITLE_CONFIG, ...res.ytSubtitleConfig };
-        notifyListeners();
       }
+      if (res?.targetLang) {
+        currentConfig.targetLang = res.targetLang;
+      }
+      notifyListeners();
     });
   }
+}
+
+if (typeof chrome !== 'undefined' && chrome.storage?.onChanged) {
+  try {
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === 'local' && changes.targetLang) {
+        const nextLang = changes.targetLang.newValue as TargetLanguage;
+        if (nextLang && currentConfig.targetLang !== nextLang) {
+          currentConfig.targetLang = nextLang;
+          notifyListeners();
+        }
+      }
+    });
+  } catch (_) {}
 }
 
 export function getSubtitleConfig(): YouTubeSubtitleStyleConfig {
@@ -59,6 +80,9 @@ export function updateSubtitleConfig(partial: Partial<YouTubeSubtitleStyleConfig
   if (typeof chrome !== 'undefined' && chrome.storage?.local) {
     try {
       chrome.storage.local.set({ ytSubtitleConfig: currentConfig });
+      if (partial.targetLang) {
+        chrome.storage.local.set({ targetLang: partial.targetLang });
+      }
     } catch (_) {}
   }
   notifyListeners();
@@ -100,6 +124,7 @@ export function formatSrtTime(ms: number): string {
  */
 export function toggleSubtitleSettingsMenu(callbacks: {
   onToggleEnabled: (enabled: boolean) => void;
+  onChangeTargetLang?: (lang: TargetLanguage) => void;
   onOpenSummary: () => void;
   onDownloadSrt: () => void;
 }): void {
@@ -251,6 +276,118 @@ export function toggleSubtitleSettingsMenu(callbacks: {
       }
     )
   );
+
+  // 2. 目标语言选择（全语言下拉菜单 + 4 个高频快捷药丸）
+  const langRow = document.createElement('div');
+  langRow.style.cssText = `
+    display: flex !important;
+    flex-direction: column !important;
+    margin-bottom: 9px !important;
+    gap: 5px !important;
+  `;
+
+  const langTopRow = document.createElement('div');
+  langTopRow.style.cssText = `
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+  `;
+
+  const langLabel = document.createElement('span');
+  langLabel.style.cssText = 'color: #CBD5E1 !important; font-size: 12px !important;';
+  langLabel.textContent = '翻译目标语言';
+
+  const langSelect = document.createElement('select');
+  langSelect.style.cssText = `
+    background: rgba(30, 41, 59, 0.95) !important;
+    color: #F8FAFC !important;
+    border: 1px solid rgba(59, 130, 246, 0.45) !important;
+    border-radius: 6px !important;
+    padding: 3px 6px !important;
+    font-size: 11.5px !important;
+    outline: none !important;
+    cursor: pointer !important;
+  `;
+
+  const allLanguages: Array<{ code: TargetLanguage; label: string }> = [
+    { code: 'zh-CN', label: '🇨🇳 简体中文' },
+    { code: 'zh-TW', label: '🇭🇰 繁體中文' },
+    { code: 'ko', label: '🇰🇷 한국어' },
+    { code: 'ja', label: '🇯🇵 日本語' },
+    { code: 'en', label: '🇺🇸 English' },
+    { code: 'fr', label: '🇫🇷 Français' },
+    { code: 'de', label: '🇩🇪 Deutsch' },
+    { code: 'es', label: '🇪🇸 Español' },
+    { code: 'ru', label: '🇷🇺 Русский' }
+  ];
+
+  const currentLang = currentConfig.targetLang || 'zh-CN';
+
+  allLanguages.forEach((l) => {
+    const opt = document.createElement('option');
+    opt.value = l.code;
+    opt.textContent = l.label;
+    if (l.code === currentLang) opt.selected = true;
+    opt.style.cssText = 'background: #0F172A; color: #F8FAFC;';
+    langSelect.appendChild(opt);
+  });
+
+  const onSelectLang = (newLang: TargetLanguage) => {
+    if (newLang === currentConfig.targetLang) return;
+    updateSubtitleConfig({ targetLang: newLang });
+    callbacks.onChangeTargetLang?.(newLang);
+    rerender();
+  };
+
+  langSelect.addEventListener('change', () => {
+    onSelectLang(langSelect.value as TargetLanguage);
+  });
+
+  langTopRow.appendChild(langLabel);
+  langTopRow.appendChild(langSelect);
+  langRow.appendChild(langTopRow);
+
+  // 4 个高频快捷药丸按钮
+  const quickPillRow = document.createElement('div');
+  quickPillRow.style.cssText = `
+    display: flex !important;
+    align-items: center !important;
+    gap: 4px !important;
+    background: rgba(30, 41, 59, 0.75) !important;
+    border-radius: 7px !important;
+    padding: 2px !important;
+  `;
+
+  const quickLanguages: Array<{ code: TargetLanguage; label: string }> = [
+    { code: 'zh-CN', label: '🇨🇳 中文' },
+    { code: 'ko', label: '🇰🇷 韩语' },
+    { code: 'ja', label: '🇯🇵 日语' },
+    { code: 'en', label: '🇺🇸 英语' }
+  ];
+
+  quickLanguages.forEach((item) => {
+    const btn = document.createElement('button');
+    const isSel = item.code === currentLang;
+    btn.textContent = item.label;
+    btn.style.cssText = `
+      flex: 1 !important;
+      border: none !important;
+      padding: 3px 0 !important;
+      border-radius: 5px !important;
+      font-size: 11px !important;
+      font-weight: ${isSel ? '700' : '500'} !important;
+      cursor: pointer !important;
+      background: ${isSel ? '#2563EB' : 'transparent'} !important;
+      color: ${isSel ? '#FFFFFF' : '#94A3B8'} !important;
+      transition: all 0.15s ease !important;
+      text-align: center !important;
+    `;
+    btn.addEventListener('click', () => onSelectLang(item.code));
+    quickPillRow.appendChild(btn);
+  });
+
+  langRow.appendChild(quickPillRow);
+  menu.appendChild(langRow);
 
   // 2. 字幕显示模式（双语对照 / 仅译文）
   menu.appendChild(

@@ -144,6 +144,13 @@ function mountBiliControlButton(targetLang: TargetLanguage): void {
       e.stopPropagation();
       toggleSubtitleSettingsMenu({
         onToggleEnabled: (en) => updateSubtitleConfig({ enabled: en }),
+        onChangeTargetLang: (lang) => {
+          currentTargetLang = lang;
+          if (biliObserver) {
+            biliObserver.setTargetLang(lang);
+          }
+          mountBiliControlButton(lang);
+        },
         onOpenSummary: () => {},
         onDownloadSrt: () => {}
       });

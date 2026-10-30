@@ -97,6 +97,28 @@ export function getSharedVideoCues(): SubtitleCue[] {
   return [];
 }
 
+/**
+ * 语言切换时彻底清空字幕共享缓存中的旧语言译文，防止串台或无法更新到新语言
+ */
+export function clearSharedCueTranslations(): void {
+  for (const c of cachedInterceptedCues) {
+    delete c.translatedText;
+  }
+  for (const c of cachedFetchedCues) {
+    delete c.translatedText;
+  }
+}
+
+/**
+ * 彻底重置共享字幕缓存（主要用于切视频或单测环境清理）
+ */
+export function clearAllSharedVideoCues(): void {
+  cachedInterceptedCues = [];
+  cachedInterceptedVideoId = null;
+  cachedFetchedCues = [];
+  cachedVideoId = null;
+}
+
 export async function preloadSharedVideoCues(videoId: string | null): Promise<SubtitleCue[]> {
   const targetVid = videoId || getLiveVideoIdFromUrl();
   if (targetVid !== cachedVideoId) {
@@ -282,7 +304,13 @@ export class YouTubeSummaryPanel {
   }
 
   public setTargetLang(lang: TargetLanguage): void {
-    this.targetLang = lang;
+    if (this.targetLang !== lang) {
+      this.targetLang = lang;
+      this.translationEpoch++;
+      this.transcriptParagraphs = [];
+      this.sections = [];
+      clearSharedCueTranslations();
+    }
   }
 
   public resetForNewVideo(videoId: string | null): void {

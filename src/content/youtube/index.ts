@@ -32,6 +32,23 @@ let domObserver: MutationObserver | null = null;
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
 
+export function resetYouTubeModuleState(): void {
+  if (nativeObserver) {
+    nativeObserver.stop();
+    nativeObserver = null;
+  }
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+  if (domObserver) {
+    domObserver.disconnect();
+    domObserver = null;
+  }
+  isLifecycleSetup = false;
+  currentVideoId = null;
+}
+
 function isYouTube(): boolean {
   if (typeof window === 'undefined') return false;
   const host = window.location.hostname || '';
@@ -251,6 +268,17 @@ function injectBottomControls(): boolean {
       if (target && target.closest('[data-tk-role="settings-trigger"]')) {
         toggleSubtitleSettingsMenu({
           onToggleEnabled: (enabled) => toggleSubtitles(enabled),
+          onChangeTargetLang: (lang) => {
+            currentTargetLang = lang;
+            if (nativeObserver) {
+              nativeObserver.setTargetLang(lang);
+            }
+            if (summaryPanel) {
+              summaryPanel.setTargetLang(lang);
+            }
+            const bottomBtn = document.getElementById('translate-king-yt-control-btn');
+            if (bottomBtn) updateButtonVisual(bottomBtn, isSubtitlesEnabled);
+          },
           onOpenSummary: () => openVideoSummaryPanel(),
           onDownloadSrt: () => downloadCurrentVideoSrt()
         });
@@ -266,6 +294,17 @@ function injectBottomControls(): boolean {
       e.preventDefault();
       toggleSubtitleSettingsMenu({
         onToggleEnabled: (enabled) => toggleSubtitles(enabled),
+        onChangeTargetLang: (lang) => {
+          currentTargetLang = lang;
+          if (nativeObserver) {
+            nativeObserver.setTargetLang(lang);
+          }
+          if (summaryPanel) {
+            summaryPanel.setTargetLang(lang);
+          }
+          const bottomBtn = document.getElementById('translate-king-yt-control-btn');
+          if (bottomBtn) updateButtonVisual(bottomBtn, isSubtitlesEnabled);
+        },
         onOpenSummary: () => openVideoSummaryPanel(),
         onDownloadSrt: () => downloadCurrentVideoSrt()
       });
@@ -419,7 +458,25 @@ function updateButtonVisual(btn: HTMLElement, force = false): void {
   const icon = createTranslateIconSvg(12);
   const label = document.createElement('span');
   label.style.cssText = 'pointer-events: none !important;';
-  label.textContent = isSubtitlesEnabled ? '双语 ON' : '双语 OFF';
+  const getLangPrefix = (lang: TargetLanguage) => {
+    switch (lang) {
+      case 'ko': return '韩语';
+      case 'ja': return '日语';
+      case 'en': return '英语';
+      case 'zh-TW': return '繁体';
+      case 'fr': return '法语';
+      case 'de': return '德语';
+      case 'es': return '西语';
+      case 'ru': return '俄语';
+      case 'zh-CN':
+      default:
+        return '双语';
+    }
+  };
+  const prefix = getLangPrefix(currentTargetLang);
+  label.textContent = isSubtitlesEnabled
+    ? (currentTargetLang === 'zh-CN' ? '双语 ON' : `${prefix} ON`)
+    : (currentTargetLang === 'zh-CN' ? '双语 OFF' : `${prefix} OFF`);
 
   // 分隔竖线 + 齿轮设置触发区
   const gearTrigger = document.createElement('span');
