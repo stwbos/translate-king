@@ -836,9 +836,21 @@ document.addEventListener(
 
     // 针对内容展开与动态流交互：如 LinkedIn "...see more" / 评论展开 / 展开更多
     const isExpandTrigger = target.closest(
-      '.feed-shared-inline-show-more-text__see-more-less-toggle, button.see-more, button[aria-label*="more" i], button[aria-label*="展开" i], .feed-shared-control-menu'
+      '.feed-shared-inline-show-more-text__see-more-less-toggle, button.see-more, button[class*="see-more"], button[aria-label*="more" i], button[aria-label*="展开" i], .feed-shared-control-menu'
     );
     if (isExpandTrigger) {
+      // 找到对应的帖子容器，重置其翻译标记以便重新提取展开后的完整长文本
+      const postCard = target.closest(
+        '.feed-shared-update-v2, .occludable-update, [data-view-name*="update"], [data-id*="urn:li:activity"], .feed-shared-inline-show-more-text, .update-components-text'
+      );
+      if (postCard) {
+        postCard.querySelectorAll('[data-tk-translated], [data-tk-replaced], [data-tk-id], .translate-king-wrapper').forEach((n) => {
+          n.removeAttribute('data-tk-translated');
+          n.removeAttribute('data-tk-replaced');
+          n.removeAttribute('data-tk-id');
+          if (n.classList.contains('translate-king-wrapper')) n.remove();
+        });
+      }
       const expandWaves = [30, 100, 250, 600];
       expandWaves.forEach((w) => {
         setTimeout(() => {

@@ -46,27 +46,39 @@ br[data-tk-hidden-br="true"] {
   display: block !important;
 }
 
-/* LinkedIn (领英) 动态正文、评论与排版防截断适配 */
-.feed-shared-inline-show-more-text,
-.feed-shared-inline-show-more-text .update-components-text,
+/* LinkedIn (领英) 动态正文、评论与排版防截断适配 (覆盖 /feed/ 与 /feed/foryou/) */
+[class*="feed-shared-inline-show-more-text"],
+[class*="update-components-text"],
+.feed-shared-update-v2__description-wrapper,
 .feed-shared-update-v2__description,
 .feed-shared-text-view,
 .feed-shared-main-content,
 .comments-comment-item-content-body,
+.comments-reply-item-content-body,
 .update-components-actor__description,
 .update-components-actor__sub-description {
   -webkit-line-clamp: unset !important;
   line-clamp: unset !important;
   max-height: none !important;
+  height: auto !important;
   overflow: visible !important;
+  display: block !important;
+  -webkit-box-orient: unset !important;
 }
 
+[data-view-name*="update"] .translate-king-wrapper,
+.occludable-update .translate-king-wrapper,
+[data-id*="urn:li:activity"] .translate-king-wrapper,
+[data-urn*="activity"] .translate-king-wrapper,
 .feed-shared-update-v2 .translate-king-wrapper,
+.update-components-text .translate-king-wrapper,
+[class*="feed-shared-inline-show-more-text"] .translate-king-wrapper,
 .comments-comment-item .translate-king-wrapper,
 .update-components-actor__meta .translate-king-wrapper {
   margin-top: 6px !important;
   margin-bottom: 4px !important;
   display: block !important;
+  clear: both !important;
 }
 
 /* X / Twitter 私信聊天气泡内嵌双语排版适配 */

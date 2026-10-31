@@ -46,6 +46,8 @@ function isPreformattedOrCommentElement(el: HTMLElement): boolean {
     el.tagName === 'YT-FORMATTED-STRING' ||
     el.tagName === 'BILI-RICH-TEXT' ||
     el.classList?.contains('bili-rich-text__content') ||
+    el.classList?.contains('update-components-text') ||
+    el.classList?.contains('feed-shared-inline-show-more-text') ||
     el.querySelector?.('.yt-core-attributed-string--white-space-pre-wrap, [style*="pre-wrap"], [style*="pre-line"]')
   ) {
     return true;
@@ -53,7 +55,7 @@ function isPreformattedOrCommentElement(el: HTMLElement): boolean {
   if (
     typeof el.matches === 'function' &&
     el.matches(
-      '#content-text, #contents, .bili-rich-text__content, [data-testid="tweetText"], [data-testid="UserDescription"], [data-testid="messageText"], [data-testid="postText"], [slot="comment"], [slot="text-body"]'
+      '#content-text, #contents, .bili-rich-text__content, .update-components-text, .feed-shared-inline-show-more-text, [class*="feed-shared-inline-show-more-text"], [data-testid="tweetText"], [data-testid="UserDescription"], [data-testid="messageText"], [data-testid="postText"], [slot="comment"], [slot="text-body"]'
     )
   ) {
     return true;
@@ -61,7 +63,7 @@ function isPreformattedOrCommentElement(el: HTMLElement): boolean {
   if (
     typeof el.closest === 'function' &&
     el.closest(
-      '#content-text, [data-testid="tweetText"], [data-testid="UserDescription"], [data-testid="messageEntry"], shreddit-comment, shreddit-post, bili-rich-text, bili-comment-renderer, bili-comment-thread-renderer'
+      '#content-text, .update-components-text, .feed-shared-inline-show-more-text, [data-testid="tweetText"], [data-testid="UserDescription"], [data-testid="messageEntry"], shreddit-comment, shreddit-post, bili-rich-text, bili-comment-renderer, bili-comment-thread-renderer'
     )
   ) {
     return true;
@@ -140,19 +142,46 @@ export const ATOMIC_BLOCK_SELECTORS = [
   '.comment-content',
   '.reply-content',
 
-  // 1.2 LinkedIn (领英) 动态正文、评论与用户简介核心提取规则
+  // 1.2 LinkedIn (领英) 全架构高容错正文、评论与动态提取规则 (覆盖 /feed/ 与 /feed/foryou/)
+  '.feed-shared-update-v2 .update-components-text span[dir]',
+  '.feed-shared-update-v2 .update-components-text > span',
   '.feed-shared-update-v2 .update-components-text span.break-words',
+  '.occludable-update .update-components-text span[dir]',
+  '.occludable-update .update-components-text > span',
+  '.occludable-update span[dir]',
+  '[data-view-name*="update"] .update-components-text span[dir]',
+  '[data-view-name*="update"] span[dir]',
+  '[data-id*="urn:li:activity"] .update-components-text span[dir]',
+  '[data-id*="urn:li:activity"] span[dir]',
+  '[data-urn*="activity"] span[dir]',
+  '.update-components-text span[dir]',
+  '.update-components-text > span',
   '.update-components-text span.break-words',
   '.update-components-text__text-view',
+  '.update-components-text',
+  '.feed-shared-inline-show-more-text span[dir]',
+  '.feed-shared-inline-show-more-text > span',
   '.feed-shared-inline-show-more-text span.break-words',
+  '.feed-shared-inline-show-more-text',
+  '[class*="feed-shared-inline-show-more-text"] span[dir]',
+  '[class*="feed-shared-inline-show-more-text"]',
   '.feed-shared-update-v2__commentary',
+  '.feed-shared-update-v2__description',
   '.feed-shared-text-view',
   '.feed-shared-main-content',
+  '.comments-comment-item-content-body span[dir]',
   '.comments-comment-item-content-body',
   '.comments-comment-item__main-content',
+  '.comments-reply-item-content-body span[dir]',
+  '.comments-reply-item-content-body',
   '.update-components-actor__description',
+  '.update-components-actor__sub-description',
   '.update-components-actor__name',
   '.update-components-actor__title',
+  '.feed-shared-actor__name',
+  '.feed-shared-actor__description',
+  '.feed-shared-actor__sub-description',
+  '.update-components-header__text-view',
   '.update-components-article__title',
   '.update-components-article__description',
   '.feed-shared-article__title',
@@ -522,7 +551,9 @@ function processElement(
   // 提取纯文本内容（忽略已挂载的译文容器，安全处理 Emoji 与内嵌样式脚本）
   const clone = el.cloneNode(true) as HTMLElement;
   if (typeof clone.querySelectorAll === 'function') {
-    clone.querySelectorAll('.translate-king-wrapper, style, script, noscript, .visually-hidden, .sr-only').forEach((n) => n.remove());
+    clone.querySelectorAll(
+      '.translate-king-wrapper, style, script, noscript, .visually-hidden, .sr-only, .feed-shared-inline-show-more-text__see-more-less-toggle, [class*="see-more"]'
+    ).forEach((n) => n.remove());
 
     // 社交媒体适配：仅对真正的 Emoji 图标保留其 alt 字符，绝不将头像 (如 "Square头像") 或角标混入文本
     clone.querySelectorAll('img').forEach((img) => {
@@ -609,7 +640,9 @@ function processElement(
   if (
     typeof el.querySelector === 'function' &&
     (el.querySelector('[data-tk-id], [data-tk-replaced]') ||
-      el.querySelector('button, [data-testid$="-follow"], [data-testid="UserCell"], [data-testid="tweet"], article') ||
+      el.querySelector(
+        'button:not(.feed-shared-inline-show-more-text__see-more-less-toggle):not([class*="see-more"]), [data-testid$="-follow"], [data-testid="UserCell"], [data-testid="tweet"], article'
+      ) ||
       (el.querySelector('[data-testid="User-Name"]') && el.getAttribute('data-testid') !== 'User-Name') ||
       ((el.tagName === 'BUTTON' ||
         (el.getAttribute('role') === 'button' &&

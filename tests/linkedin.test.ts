@@ -48,6 +48,37 @@ describe('LinkedIn Feed DOM Translation Test', () => {
     expect(postBlock?.originalText).not.toContain('...see more');
   });
 
+  it('1.1 LinkedIn 动态帖子正文 (无 span.break-words，直接使用 span[dir])', () => {
+    const app = doc.getElementById('app')!;
+    app.innerHTML = `
+      <div class="occludable-update feed-shared-update-v2 ember-view">
+        <div class="feed-shared-update-v2__description-wrapper">
+          <div class="feed-shared-inline-show-more-text feed-shared-update-v2__description">
+            <div class="update-components-text relative">
+              <span dir="ltr">
+                <span>This is a direct post text without break-words class on LinkedIn feed.</span>
+              </span>
+              <button class="feed-shared-inline-show-more-text__see-more-less-toggle" type="button">
+                <span>...see more</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    const blocks = extractTranslatableBlocks(doc, 'zh-CN');
+    console.log('Extracted blocks for Post without break-words:', blocks.map(b => ({
+      tagName: b.element.tagName,
+      className: b.element.className,
+      text: b.originalText
+    })));
+
+    const postBlock = blocks.find(b => b.originalText.includes('direct post text'));
+    expect(postBlock).toBeDefined();
+    expect(postBlock?.originalText).not.toContain('...see more');
+  });
+
   it('2. LinkedIn 用户头衔与姓名 (包含 visually-hidden 和 aria-hidden 重复文本)', () => {
     const app = doc.getElementById('app')!;
     app.innerHTML = `
@@ -172,5 +203,62 @@ describe('LinkedIn Feed DOM Translation Test', () => {
     expect(res.translations[5]).toBe('建立人脉');
     expect(res.translations[6]).toBe('评论');
     expect(res.translations[7]).toBe('转发');
+  });
+
+  it('7. LinkedIn /feed/foryou/ 推荐流卡片 (data-view-name="feed-full-update" 与 data-id)', () => {
+    const app = doc.getElementById('app')!;
+    app.innerHTML = `
+      <div data-view-name="feed-full-update" data-id="urn:li:activity:7251234567890">
+        <div class="update-components-actor">
+          <div class="update-components-actor__container">
+            <span class="update-components-actor__title">
+              <span dir="ltr">Sam Altman</span>
+            </span>
+            <span class="update-components-actor__description">
+              <span dir="ltr">CEO at OpenAI</span>
+            </span>
+          </div>
+        </div>
+        <div class="update-components-text relative">
+          <span dir="ltr">
+            <span>Here is our latest update on the frontier model developments and upcoming features for developers.</span>
+          </span>
+          <button class="feed-shared-inline-show-more-text__see-more-less-toggle" type="button">
+            <span>...see more</span>
+          </button>
+        </div>
+      </div>
+    `;
+
+    const blocks = extractTranslatableBlocks(doc, 'zh-CN');
+    const authorBlock = blocks.find(b => b.originalText.includes('Sam Altman'));
+    const descBlock = blocks.find(b => b.originalText.includes('CEO at OpenAI'));
+    const contentBlock = blocks.find(b => b.originalText.includes('frontier model developments'));
+
+    expect(authorBlock).toBeDefined();
+    expect(descBlock).toBeDefined();
+    expect(contentBlock).toBeDefined();
+    expect(contentBlock?.originalText).not.toContain('...see more');
+  });
+
+  it('8. LinkedIn 极简正文结构 (无 span[dir]，直接为 update-components-text + see-more 按钮)', () => {
+    const app = doc.getElementById('app')!;
+    app.innerHTML = `
+      <div class="feed-shared-update-v2">
+        <div class="feed-shared-inline-show-more-text">
+          <div class="update-components-text">
+            Just published our new comprehensive benchmark analysis comparing reasoning models.
+            <button class="feed-shared-inline-show-more-text__see-more-less-toggle" type="button">
+              <span>...see more</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    const blocks = extractTranslatableBlocks(doc, 'zh-CN');
+    const contentBlock = blocks.find(b => b.originalText.includes('comprehensive benchmark analysis'));
+    expect(contentBlock).toBeDefined();
+    expect(contentBlock?.originalText).not.toContain('...see more');
   });
 });
