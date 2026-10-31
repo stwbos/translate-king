@@ -48,6 +48,12 @@ let enableSelection = true;
 
 function mountOrUpdateFloatingBall(): void {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
+  // 悬浮球仅在顶层窗口挂载，避免在嵌入式 iframe 内部重复生成
+  try {
+    if (window.self !== window.top) return;
+  } catch {
+    return;
+  }
   setupFloatingBall({
     onToggleTranslate: () => togglePageTranslation(activeTargetLang, activeTranslationMode),
     onChangeMode: (mode) => {
@@ -622,9 +628,10 @@ async function translateFullPage(
     const blocks = extractTranslatableBlocks(document, activeTargetLang);
     if (blocks.length === 0) {
       console.log('[TranslateKing] 当前页面未检测到有效待翻译文本，已挂载动态监听');
-      isPageTranslated = true;
+      isPageTranslated = false;
       startDynamicObserver();
       isTranslating = false;
+      refreshFloatingBallVisual();
       return;
     }
 
@@ -727,9 +734,8 @@ export function togglePageTranslation(
     ? document.querySelectorAll('.translate-king-wrapper.translate-king-done, [data-tk-replaced]').length
     : 0;
 
-  // 如果之前标记为已翻译，但页面实际上没有任何译文（例如页面放置很久后被单页框架重新渲染回英文、或初次翻译未成功上屏）
-  // 则绝不执行“还原原文”，而是强制复位状态并立即重新触发全页翻译！
-  if (isPageTranslated && activeTranslationCount > 0) {
+  // 如果页面当前处于翻译状态（或已有译文），点击则执行还原原文；否则开启全页翻译
+  if (isPageTranslated || activeTranslationCount > 0) {
     if (targetLang && targetLang !== activeTargetLang) {
       restoreOriginalPage();
       translateFullPage(targetLang, mode, true);

@@ -264,19 +264,91 @@ export function shouldIgnoreElement(element: Element): boolean {
     }
   }
 
-  // 遵循 W3C 规范：translate="no" 或 class="notranslate"
+  // 严格保护社交媒体动态流中的底层操作按钮（点赞/评论/转发/自带查看翻译按钮/展开更多等），
+  // 严禁将其提取或篡改内部结构，防止破坏 React/Ember 虚拟 DOM 绑定导致按钮报错或页面卡死
   if (
-    element.getAttribute('translate') === 'no' ||
-    element.classList.contains('notranslate') ||
+    element.tagName === 'BUTTON' ||
+    element.getAttribute?.('role') === 'button' ||
+    (typeof element.closest === 'function' &&
+      element.closest(
+        'button, [role="button"], .artdeco-button, .feed-shared-social-actions, .feed-shared-see-translation-button, .feed-shared-inline-show-more-text__see-more-less-toggle'
+      ))
+  ) {
+    const isSpecialNavOrFollow =
+      typeof element.matches === 'function' &&
+      element.matches(
+        '[data-testid$="-follow"], [data-testid$="-unfollow"], [data-testid="tweetButton"], [data-testid="tweetButtonInline"], .vector-toc-toggle'
+      );
+    const closestSpecial =
+      typeof element.closest === 'function' &&
+      element.closest('[data-testid$="-follow"], [data-testid$="-unfollow"], [data-testid="tweetButton"]');
+
+    if (!isSpecialNavOrFollow && !closestSpecial) {
+      if (
+        typeof element.closest === 'function' &&
+        element.closest(
+          '.feed-shared-update-v2, .occludable-update, [data-view-name*="update"], [data-id*="urn:li:activity"], .comments-comment-item'
+        )
+      ) {
+        if (
+          element.tagName === 'BUTTON' ||
+          element.getAttribute?.('role') === 'button' ||
+          element.classList?.contains('artdeco-button') ||
+          element.classList?.contains('feed-shared-see-translation-button') ||
+          element.classList?.contains('feed-shared-inline-show-more-text__see-more-less-toggle') ||
+          (typeof element.closest === 'function' &&
+            element.closest(
+              '.feed-shared-social-actions, .feed-shared-see-translation-button, .feed-shared-inline-show-more-text__see-more-less-toggle'
+            ))
+        ) {
+          return true;
+        }
+      }
+    }
+  }
+
+  // 过滤隐藏/无障碍多余文本与可编辑输入区域
+  if (
     element.classList.contains('visually-hidden') ||
     element.classList.contains('sr-only') ||
     element.classList.contains('mw-editsection-bracket') ||
     element.classList.contains('vector-toc-numb') ||
     (typeof element.closest === 'function' &&
-      element.closest('.mw-editsection-bracket, .vector-toc-numb, [translate="no"], .notranslate, .visually-hidden, .sr-only')) ||
+      element.closest('.mw-editsection-bracket, .vector-toc-numb, .visually-hidden, .sr-only')) ||
     (element as HTMLElement).isContentEditable
   ) {
     return true;
+  }
+
+  // 局部明确标记 translate="no" 或 class="notranslate" 的独立小元素（如内联公式/专有品牌），跳过自身
+  // 核心突破：绝不能让 <html translate="no"> 或 <body translate="no"> 导致全站拒绝翻译！
+  // 领英等网站在 <html> 挂载 translate="no" 以防御 Chrome 自带翻译，用户主动请求时必须穿透该防御
+  if (
+    element.tagName !== 'HTML' &&
+    element.tagName !== 'BODY' &&
+    (element.getAttribute('translate') === 'no' || element.classList.contains('notranslate'))
+  ) {
+    return true;
+  }
+
+  if (typeof element.closest === 'function') {
+    const noTransParent = element.closest('[translate="no"], .notranslate');
+    if (
+      noTransParent &&
+      noTransParent !== element &&
+      noTransParent.tagName !== 'HTML' &&
+      noTransParent.tagName !== 'BODY' &&
+      noTransParent.id !== 'translate-king-root'
+    ) {
+      // 只有在祖先是非顶层布局容器的小部件时才生效（若包含多段落或动态卡片，说明是外层框架防御）
+      const isTopLayout =
+        noTransParent.matches?.('html, body, main, #app, #root, .application-outlet, [data-view-name*="update"]') ||
+        (typeof noTransParent.querySelectorAll === 'function' &&
+          noTransParent.querySelectorAll('p, article, [data-view-name*="update"], .feed-shared-update-v2').length > 1);
+      if (!isTopLayout) {
+        return true;
+      }
+    }
   }
 
   // 检查是否属于特定平台噪声容器

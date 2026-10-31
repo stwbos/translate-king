@@ -443,7 +443,7 @@ export function setupFloatingBall(callbacks: FloatingBallCallbacks): void {
   window.addEventListener('mousemove', (e: MouseEvent) => {
     if (!isDragging) return;
     const dy = e.clientY - startY;
-    if (Math.abs(dy) > 4) {
+    if (Math.abs(dy) > 12) {
       hasMoved = true;
       const nextTop = Math.max(64, Math.min(window.innerHeight - 80, startTop + dy));
       dockRoot.style.top = `${nextTop}px`;
@@ -451,12 +451,17 @@ export function setupFloatingBall(callbacks: FloatingBallCallbacks): void {
   });
 
   window.addEventListener('mouseup', () => {
-    isDragging = false;
+    setTimeout(() => {
+      isDragging = false;
+    }, 20);
   });
 
   ballPill.addEventListener('click', (e) => {
     e.stopPropagation();
-    if (hasMoved) return;
+    if (hasMoved) {
+      hasMoved = false;
+      return;
+    }
     callbacks.onToggleTranslate();
     setTimeout(refreshFloatingBallVisual, 50);
   });

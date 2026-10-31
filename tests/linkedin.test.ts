@@ -261,4 +261,71 @@ describe('LinkedIn Feed DOM Translation Test', () => {
     expect(contentBlock).toBeDefined();
     expect(contentBlock?.originalText).not.toContain('...see more');
   });
+
+  it('9. 突破 LinkedIn 防御：当 <html translate="no"> 时，仍能穿透并成功提取翻译正文', () => {
+    // 模拟 LinkedIn 线上真实 DOM：LinkedIn 在 <html> 上挂载 translate="no"，导致大部分翻译插件全站失效
+    doc.documentElement.setAttribute('translate', 'no');
+
+    const app = doc.getElementById('app')!;
+    app.innerHTML = `
+      <div class="occludable-update feed-shared-update-v2 ember-view">
+        <div class="feed-shared-update-v2__description-wrapper">
+          <div class="feed-shared-inline-show-more-text feed-shared-update-v2__description">
+            <div class="update-components-text relative">
+              <span dir="ltr">
+                <span class="break-words">
+                  <span>Breaking through LinkedIn anti-translation defense successfully!</span>
+                </span>
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    const blocks = extractTranslatableBlocks(doc, 'zh-CN');
+    const targetBlock = blocks.find(b => b.originalText.includes('Breaking through LinkedIn'));
+    expect(targetBlock).toBeDefined();
+    expect(targetBlock?.originalText).toBe('Breaking through LinkedIn anti-translation defense successfully!');
+
+    // 恢复
+    doc.documentElement.removeAttribute('translate');
+  });
+
+  it('10. 严格保护 LinkedIn 原生交互按钮与 See translation 按钮，严禁篡改其 DOM 结构', async () => {
+    const { shouldIgnoreElement } = await import('../src/content/dom/filter');
+    const app = doc.getElementById('app')!;
+    app.innerHTML = `
+      <div class="feed-shared-update-v2">
+        <div class="feed-shared-see-translation">
+          <button class="feed-shared-see-translation-button artdeco-button artdeco-button--muted artdeco-button--tertiary">
+            <span class="artdeco-button__text">See translation</span>
+          </button>
+        </div>
+        <div class="feed-shared-social-actions">
+          <button class="artdeco-button artdeco-button--muted feed-shared-social-action-bar__action-button">
+            <svg class="artdeco-button__icon"><path d="..."></path></svg>
+            <span class="artdeco-button__text">Like</span>
+          </button>
+          <button class="artdeco-button artdeco-button--muted feed-shared-social-action-bar__action-button">
+            <span class="artdeco-button__text">Comment</span>
+          </button>
+        </div>
+      </div>
+    `;
+
+    const seeTransBtn = app.querySelector('.feed-shared-see-translation-button')!;
+    const seeTransText = seeTransBtn.querySelector('.artdeco-button__text')!;
+    const likeBtn = app.querySelector('.feed-shared-social-action-bar__action-button')!;
+    const likeText = likeBtn.querySelector('.artdeco-button__text')!;
+
+    expect(shouldIgnoreElement(seeTransBtn)).toBe(true);
+    expect(shouldIgnoreElement(seeTransText)).toBe(true);
+    expect(shouldIgnoreElement(likeBtn)).toBe(true);
+    expect(shouldIgnoreElement(likeText)).toBe(true);
+
+    const blocks = extractTranslatableBlocks(doc, 'zh-CN');
+    const buttonBlock = blocks.find(b => b.originalText === 'See translation' || b.originalText === 'Like');
+    expect(buttonBlock).toBeUndefined();
+  });
 });
