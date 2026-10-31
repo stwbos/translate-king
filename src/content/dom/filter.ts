@@ -32,12 +32,15 @@ const REFERENCE_SELECTORS = [
   '.vector-toc-toggle'
 ].join(',');
 
-// 社交平台（如 X / Twitter）专属绝对噪声选择器（避免误翻译发推输入框、私信输入框、搜索框）
+// 社交平台（如 X / Twitter、LinkedIn）专属绝对噪声选择器（避免误翻译发推/发帖输入框、私信输入框、搜索框）
 const NOISE_SELECTORS = [
   '[data-testid="tweetTextarea_0"]',
   '[data-testid="DMComposerTextInput"]',
   '[data-testid="SearchBox_Search_Input"]',
-  '[role="progressbar"]'
+  '[role="progressbar"]',
+  '.msg-form__contenteditable',
+  '.msg-form__msg-content-container',
+  '.share-creation-state'
 ].join(',');
 
 // 视频播放器、字幕容器及翻译王自身所有 UI 组件保护选择器
@@ -342,9 +345,11 @@ export function shouldIgnoreElement(element: Element): boolean {
     ) {
       // 只有在祖先是非顶层布局容器的小部件时才生效（若包含多段落或动态卡片，说明是外层框架防御）
       const isTopLayout =
-        noTransParent.matches?.('html, body, main, #app, #root, .application-outlet, [data-view-name*="update"]') ||
+        noTransParent.matches?.(
+          'html, body, main, #app, #root, .application-outlet, .scaffold-layout, [data-view-name*="update"], .feed-shared-update-v2, .occludable-update, .msg-thread, .msg-overlay-list-bubble'
+        ) ||
         (typeof noTransParent.querySelectorAll === 'function' &&
-          noTransParent.querySelectorAll('p, article, [data-view-name*="update"], .feed-shared-update-v2').length > 1);
+          noTransParent.querySelectorAll('p, article, [data-view-name*="update"], .feed-shared-update-v2, .msg-s-event-listitem').length > 0);
       if (!isTopLayout) {
         return true;
       }

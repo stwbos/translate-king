@@ -48,6 +48,8 @@ function isPreformattedOrCommentElement(el: HTMLElement): boolean {
     el.classList?.contains('bili-rich-text__content') ||
     el.classList?.contains('update-components-text') ||
     el.classList?.contains('feed-shared-inline-show-more-text') ||
+    el.classList?.contains('msg-s-event-listitem__body') ||
+    el.classList?.contains('attributed-text-segment-list__content') ||
     el.querySelector?.('.yt-core-attributed-string--white-space-pre-wrap, [style*="pre-wrap"], [style*="pre-line"]')
   ) {
     return true;
@@ -55,7 +57,7 @@ function isPreformattedOrCommentElement(el: HTMLElement): boolean {
   if (
     typeof el.matches === 'function' &&
     el.matches(
-      '#content-text, #contents, .bili-rich-text__content, .update-components-text, .feed-shared-inline-show-more-text, [class*="feed-shared-inline-show-more-text"], [data-testid="tweetText"], [data-testid="UserDescription"], [data-testid="messageText"], [data-testid="postText"], [slot="comment"], [slot="text-body"]'
+      '#content-text, #contents, .bili-rich-text__content, .update-components-text, .feed-shared-inline-show-more-text, [class*="feed-shared-inline-show-more-text"], .msg-s-event-listitem__body, .attributed-text-segment-list__content, [data-testid="tweetText"], [data-testid="UserDescription"], [data-testid="messageText"], [data-testid="postText"], [slot="comment"], [slot="text-body"]'
     )
   ) {
     return true;
@@ -63,7 +65,7 @@ function isPreformattedOrCommentElement(el: HTMLElement): boolean {
   if (
     typeof el.closest === 'function' &&
     el.closest(
-      '#content-text, .update-components-text, .feed-shared-inline-show-more-text, [data-testid="tweetText"], [data-testid="UserDescription"], [data-testid="messageEntry"], shreddit-comment, shreddit-post, bili-rich-text, bili-comment-renderer, bili-comment-thread-renderer'
+      '#content-text, .update-components-text, .feed-shared-inline-show-more-text, .msg-s-event-listitem__body, .attributed-text-segment-list__content, [data-testid="tweetText"], [data-testid="UserDescription"], [data-testid="messageEntry"], shreddit-comment, shreddit-post, bili-rich-text, bili-comment-renderer, bili-comment-thread-renderer'
     )
   ) {
     return true;
@@ -154,6 +156,8 @@ export const ATOMIC_BLOCK_SELECTORS = [
   '[data-id*="urn:li:activity"] .update-components-text span[dir]',
   '[data-id*="urn:li:activity"] span[dir]',
   '[data-urn*="activity"] span[dir]',
+  '.attributed-text-segment-list__content',
+  '.attributed-text-segment-list',
   '.update-components-text span[dir]',
   '.update-components-text > span',
   '.update-components-text span.break-words',
@@ -168,6 +172,7 @@ export const ATOMIC_BLOCK_SELECTORS = [
   '.feed-shared-update-v2__commentary',
   '.feed-shared-update-v2__description',
   '.feed-shared-text-view',
+  '.feed-shared-text',
   '.feed-shared-main-content',
   '.comments-comment-item-content-body span[dir]',
   '.comments-comment-item-content-body',
@@ -188,6 +193,16 @@ export const ATOMIC_BLOCK_SELECTORS = [
   '.feed-shared-article__description',
   '.update-components-mini-update-v2__title',
   '.feed-shared-poll',
+
+  // 1.3 LinkedIn (领英) 私信聊天 (Messaging) 与通知 (Notifications) 核心高精度提取
+  '.msg-s-event-listitem__body',
+  'p.msg-s-event-listitem__body',
+  '.msg-conversation-card__message-snippet-body',
+  '.msg-overlay-bubble-header__title',
+  '.msg-conversation-listitem__summary-snippet',
+  '.nt-card__headline',
+  '.nt-card__text',
+  '.nt-card-compact__content',
 
   // 2. X / Twitter 推荐卡片 (UserCell) 专用高精度抽取规则
   '[data-testid="UserCell"] [dir="auto"]',

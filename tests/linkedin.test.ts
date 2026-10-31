@@ -328,4 +328,101 @@ describe('LinkedIn Feed DOM Translation Test', () => {
     const buttonBlock = blocks.find(b => b.originalText === 'See translation' || b.originalText === 'Like');
     expect(buttonBlock).toBeUndefined();
   });
+
+  it('11. LinkedIn 私信聊天 (Messaging) 与查看信息对话框内容提取', () => {
+    const app = doc.getElementById('app')!;
+    app.innerHTML = `
+      <div class="msg-overlay-conversation-bubble">
+        <header class="msg-overlay-bubble-header">
+          <h2 class="msg-overlay-bubble-header__title">
+            <a href="/in/alex-smith">Alex Smith</a>
+          </h2>
+        </header>
+        <div class="msg-s-message-list-container">
+          <ul class="msg-s-message-list">
+            <li class="msg-s-event-listitem">
+              <div class="msg-s-event-listitem__message-bubble">
+                <p class="msg-s-event-listitem__body">
+                  Hi, thanks for reaching out! Let me know if you are free for a quick call tomorrow.
+                </p>
+              </div>
+            </li>
+          </ul>
+        </div>
+      </div>
+    `;
+
+    const blocks = extractTranslatableBlocks(doc, 'zh-CN');
+    const msgBlock = blocks.find(b => b.originalText.includes('thanks for reaching out'));
+    expect(msgBlock).toBeDefined();
+    expect(msgBlock?.originalText).toBe('Hi, thanks for reaching out! Let me know if you are free for a quick call tomorrow.');
+  });
+
+  it('12. LinkedIn 下滑动态加载新贴 (Infinite Scroll) 能增量提取并注入译文', () => {
+    const app = doc.getElementById('app')!;
+    // 模拟首屏已翻译 1 贴
+    app.innerHTML = `
+      <div class="scaffold-finite-scroll__content">
+        <div class="occludable-update feed-shared-update-v2" id="post-1">
+          <div class="update-components-text relative">
+            <span dir="ltr">
+              <span>First post already translated.</span>
+            </span>
+          </div>
+        </div>
+      </div>
+    `;
+
+    const initialBlocks = extractTranslatableBlocks(doc, 'zh-CN');
+    expect(initialBlocks.length).toBe(1);
+    injectTranslation(initialBlocks[0], '第一条已翻译帖子。', 'bilingual');
+
+    // 模拟用户下滑，滚动加载出新贴 (post-2)
+    const container = app.querySelector('.scaffold-finite-scroll__content')!;
+    const newPost = doc.createElement('div');
+    newPost.className = 'occludable-update feed-shared-update-v2';
+    newPost.id = 'post-2';
+    newPost.innerHTML = `
+      <div class="update-components-text relative">
+        <span dir="ltr">
+          <span class="break-words">
+            <span>Second post loaded dynamically via infinite scroll!</span>
+          </span>
+        </span>
+      </div>
+    `;
+    container.appendChild(newPost);
+
+    // 增量提取：只应当提取新贴，首贴已被接管不再提取
+    const secondPassBlocks = extractTranslatableBlocks(doc, 'zh-CN');
+    expect(secondPassBlocks.length).toBe(1);
+    expect(secondPassBlocks[0].originalText).toBe('Second post loaded dynamically via infinite scroll!');
+  });
+
+  it('13. 导航操作按钮翻译时必须安全保留内联 SVG 图标，严禁整体破坏 DOM', () => {
+    const app = doc.getElementById('app')!;
+    app.innerHTML = `
+      <button class="global-nav__primary-link">
+        <svg class="global-nav__icon"><path d="M10 20..."></path></svg>
+        <span class="global-nav__primary-link-text">Messaging</span>
+      </button>
+    `;
+
+    const btn = app.querySelector('button')!;
+    injectTranslation(
+      {
+        id: 'test-btn',
+        element: btn,
+        originalText: 'Messaging'
+      },
+      '消息',
+      'bilingual'
+    );
+
+    // 验证 SVG 依旧完好保留在 DOM 树中
+    const svg = btn.querySelector('svg');
+    expect(svg).not.toBeNull();
+    // 验证文本节点已更新
+    expect(btn.textContent).toContain('消息');
+  });
 });

@@ -442,11 +442,20 @@ export function injectTranslation(
   // 模式 2：有英语基础 · 双语对照伴读模式 (英文在上，中文在下)
   // ========================================================
   // 对于操作按钮，在双语模式下直接原地替换文本（避免在小按钮内塞入双行导致界面错位）
+  // 核心保护：严禁使用 el.textContent 暴力抹除内部 DOM，必须定位文本节点安全更新，完整保留 SVG 图标与 React 事件绑定
   if (isInteractiveButton(el)) {
     if (!el.hasAttribute('data-tk-orig-text')) {
       el.setAttribute('data-tk-orig-text', block.originalText);
     }
-    el.textContent = translatedText;
+    const textNodes = doc ? collectManagedTextNodes(el, doc) : [];
+    if (textNodes.length > 0) {
+      textNodes[0].nodeValue = translatedText;
+      for (let i = 1; i < textNodes.length; i++) {
+        textNodes[i].nodeValue = '';
+      }
+    } else {
+      el.textContent = translatedText;
+    }
     el.setAttribute('data-tk-trans-text', translatedText);
     el.setAttribute('data-tk-replaced', 'true');
     return;

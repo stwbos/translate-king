@@ -404,14 +404,17 @@ function processDynamicMutations(delay = 40): void {
             await translateAndMountBlocks(visibleBlocks, activeTargetLang);
           }
 
-          // 更远距离的屏外内容：后台静默全量预取
+          // 更远距离的屏外内容：后台异步全量预取，不霸占增量处理主锁
           if (offscreenBlocks.length > 0) {
-            const CHUNK_SIZE = 30;
-            for (let i = 0; i < offscreenBlocks.length; i += CHUNK_SIZE) {
-              if (!isPageTranslated || !isExtensionValid()) break;
-              const chunk = offscreenBlocks.slice(i, i + CHUNK_SIZE);
-              await translateAndMountBlocks(chunk, activeTargetLang);
-            }
+            (async () => {
+              const CHUNK_SIZE = 30;
+              for (let i = 0; i < offscreenBlocks.length; i += CHUNK_SIZE) {
+                if (!isPageTranslated || !isExtensionValid()) break;
+                const chunk = offscreenBlocks.slice(i, i + CHUNK_SIZE);
+                await translateAndMountBlocks(chunk, activeTargetLang);
+                await new Promise((r) => setTimeout(r, 10));
+              }
+            })();
           }
         }
       }
@@ -513,16 +516,21 @@ function startDynamicObserver(): void {
             }
           }
 
-          // 若变动节点与 X 私信/聊天气泡相关，标记高优先级极速上屏
+          // 社交平台私信/聊天与动态流卡片高优判定 (X / Twitter + LinkedIn)
           if (
             el.getAttribute?.('data-testid') === 'messageEntry' ||
             el.getAttribute?.('data-testid') === 'conversation' ||
             el.getAttribute?.('data-testid') === 'cellInnerDiv' ||
             el.getAttribute?.('data-testid') === 'DMConversation' ||
             el.getAttribute?.('data-testid') === 'DMChatTranscript' ||
+            el.classList?.contains('msg-s-event-listitem') ||
+            el.classList?.contains('msg-overlay-conversation-bubble') ||
+            el.classList?.contains('msg-thread') ||
+            el.classList?.contains('feed-shared-update-v2') ||
+            el.classList?.contains('occludable-update') ||
             (typeof el.querySelector === 'function' &&
               el.querySelector(
-                '[data-testid="messageEntry"], [data-testid="conversation"], [data-testid="cellInnerDiv"], [data-testid="DMConversation"]'
+                '[data-testid="messageEntry"], [data-testid="conversation"], [data-testid="cellInnerDiv"], [data-testid="DMConversation"], .msg-s-event-listitem, .msg-thread, .feed-shared-update-v2, .occludable-update'
               ))
           ) {
             isHighPriorityChat = true;
@@ -559,9 +567,10 @@ function startDynamicObserver(): void {
     }
   }
 
-  // 注册全局被动滚动感知，在用户快速滚动列表时增量自愈
+  // 注册全局被动滚动感知，在用户快速滚动列表或内部滚动容器 (如 LinkedIn scaffold-layout) 时增量自愈
+  // 使用 capture: true 捕获内部不冒泡的滚动事件
   if (typeof window !== 'undefined') {
-    window.addEventListener('scroll', handlePassiveScroll, { passive: true });
+    window.addEventListener('scroll', handlePassiveScroll, { passive: true, capture: true });
   }
 }
 
@@ -570,6 +579,7 @@ function startDynamicObserver(): void {
  */
 function stopDynamicObserver(): void {
   if (typeof window !== 'undefined') {
+    window.removeEventListener('scroll', handlePassiveScroll, { capture: true } as any);
     window.removeEventListener('scroll', handlePassiveScroll);
   }
   if (scrollThrottleTimer) {
@@ -627,8 +637,8 @@ async function translateFullPage(
 
     const blocks = extractTranslatableBlocks(document, activeTargetLang);
     if (blocks.length === 0) {
-      console.log('[TranslateKing] 当前页面未检测到有效待翻译文本，已挂载动态监听');
-      isPageTranslated = false;
+      console.log('[TranslateKing] 当前页面未检测到有效待翻译文本，已维持翻译就绪状态并挂载动态监听');
+      isPageTranslated = true;
       startDynamicObserver();
       isTranslating = false;
       refreshFloatingBallVisual();
@@ -819,7 +829,7 @@ document.addEventListener(
     if (!target) return;
 
     const navElement = target.closest(
-      'a, [role="link"], [role="tab"], [data-testid="conversation"], [data-testid="messageEntry"], [data-testid="cellInnerDiv"], [data-testid="AppTabBar_DirectMessage_Link"], [data-testid="SideNav_NewTweet_Button"]'
+      'a, [role="link"], [role="tab"], [role="menuitem"], [data-testid="conversation"], [data-testid="messageEntry"], [data-testid="cellInnerDiv"], [data-testid="AppTabBar_DirectMessage_Link"], [data-testid="SideNav_NewTweet_Button"], .global-nav__primary-link, .artdeco-dropdown__item, .artdeco-dropdown__trigger, .msg-overlay-bubble-header, .msg-conversation-listitem, .feed-shared-control-menu__trigger'
     );
     if (navElement) {
       triggerFastSpaCheck();
@@ -827,7 +837,7 @@ document.addEventListener(
 
     // 针对私信聊天界面与导航：若点击了具体的聊天会话项或私信入口，启动聊天消息加载专属波段扫描
     const isChatTrigger = target.closest(
-      '[data-testid="conversation"], [data-testid="messageEntry"], [data-testid="cellInnerDiv"], [data-testid="DMConversation"], [data-testid="DMChatTranscript"], [data-testid="AppTabBar_DirectMessage_Link"], a[href*="/messages"], [aria-label*="私信"], [aria-label*="Messages" i]'
+      '[data-testid="conversation"], [data-testid="messageEntry"], [data-testid="cellInnerDiv"], [data-testid="DMConversation"], [data-testid="DMChatTranscript"], [data-testid="AppTabBar_DirectMessage_Link"], a[href*="/messages"], a[href*="/messaging"], .msg-overlay-bubble-header, .msg-conversation-listitem, [aria-label*="私信"], [aria-label*="Messages" i], [aria-label*="消息" i]'
     );
     if (isChatTrigger) {
       const chatWaves = [25, 80, 160, 320, 600, 1200, 2000, 3500];
