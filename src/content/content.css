@@ -46,6 +46,29 @@ br[data-tk-hidden-br="true"] {
   display: block !important;
 }
 
+/* LinkedIn (领英) 动态正文、评论与排版防截断适配 */
+.feed-shared-inline-show-more-text,
+.feed-shared-inline-show-more-text .update-components-text,
+.feed-shared-update-v2__description,
+.feed-shared-text-view,
+.feed-shared-main-content,
+.comments-comment-item-content-body,
+.update-components-actor__description,
+.update-components-actor__sub-description {
+  -webkit-line-clamp: unset !important;
+  line-clamp: unset !important;
+  max-height: none !important;
+  overflow: visible !important;
+}
+
+.feed-shared-update-v2 .translate-king-wrapper,
+.comments-comment-item .translate-king-wrapper,
+.update-components-actor__meta .translate-king-wrapper {
+  margin-top: 6px !important;
+  margin-bottom: 4px !important;
+  display: block !important;
+}
+
 /* X / Twitter 私信聊天气泡内嵌双语排版适配 */
 [data-testid="messageEntry"] .translate-king-wrapper,
 [data-testid="cellInnerDiv"] .translate-king-wrapper,

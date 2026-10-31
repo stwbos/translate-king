@@ -140,6 +140,26 @@ export const ATOMIC_BLOCK_SELECTORS = [
   '.comment-content',
   '.reply-content',
 
+  // 1.2 LinkedIn (领英) 动态正文、评论与用户简介核心提取规则
+  '.feed-shared-update-v2 .update-components-text span.break-words',
+  '.update-components-text span.break-words',
+  '.update-components-text__text-view',
+  '.feed-shared-inline-show-more-text span.break-words',
+  '.feed-shared-update-v2__commentary',
+  '.feed-shared-text-view',
+  '.feed-shared-main-content',
+  '.comments-comment-item-content-body',
+  '.comments-comment-item__main-content',
+  '.update-components-actor__description',
+  '.update-components-actor__name',
+  '.update-components-actor__title',
+  '.update-components-article__title',
+  '.update-components-article__description',
+  '.feed-shared-article__title',
+  '.feed-shared-article__description',
+  '.update-components-mini-update-v2__title',
+  '.feed-shared-poll',
+
   // 2. X / Twitter 推荐卡片 (UserCell) 专用高精度抽取规则
   '[data-testid="UserCell"] [dir="auto"]',
   '[data-testid="UserCell"] [dir="ltr"]',
@@ -502,7 +522,7 @@ function processElement(
   // 提取纯文本内容（忽略已挂载的译文容器，安全处理 Emoji 与内嵌样式脚本）
   const clone = el.cloneNode(true) as HTMLElement;
   if (typeof clone.querySelectorAll === 'function') {
-    clone.querySelectorAll('.translate-king-wrapper, style, script, noscript').forEach((n) => n.remove());
+    clone.querySelectorAll('.translate-king-wrapper, style, script, noscript, .visually-hidden, .sr-only').forEach((n) => n.remove());
 
     // 社交媒体适配：仅对真正的 Emoji 图标保留其 alt 字符，绝不将头像 (如 "Square头像") 或角标混入文本
     clone.querySelectorAll('img').forEach((img) => {

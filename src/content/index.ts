@@ -833,6 +833,21 @@ document.addEventListener(
         }, w);
       });
     }
+
+    // 针对内容展开与动态流交互：如 LinkedIn "...see more" / 评论展开 / 展开更多
+    const isExpandTrigger = target.closest(
+      '.feed-shared-inline-show-more-text__see-more-less-toggle, button.see-more, button[aria-label*="more" i], button[aria-label*="展开" i], .feed-shared-control-menu'
+    );
+    if (isExpandTrigger) {
+      const expandWaves = [30, 100, 250, 600];
+      expandWaves.forEach((w) => {
+        setTimeout(() => {
+          if (isPageTranslated && isExtensionValid()) {
+            processDynamicMutations(0);
+          }
+        }, w);
+      });
+    }
   },
   true
 );

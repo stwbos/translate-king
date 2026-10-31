@@ -268,10 +268,12 @@ export function shouldIgnoreElement(element: Element): boolean {
   if (
     element.getAttribute('translate') === 'no' ||
     element.classList.contains('notranslate') ||
+    element.classList.contains('visually-hidden') ||
+    element.classList.contains('sr-only') ||
     element.classList.contains('mw-editsection-bracket') ||
     element.classList.contains('vector-toc-numb') ||
     (typeof element.closest === 'function' &&
-      element.closest('.mw-editsection-bracket, .vector-toc-numb, [translate="no"], .notranslate')) ||
+      element.closest('.mw-editsection-bracket, .vector-toc-numb, [translate="no"], .notranslate, .visually-hidden, .sr-only')) ||
     (element as HTMLElement).isContentEditable
   ) {
     return true;
