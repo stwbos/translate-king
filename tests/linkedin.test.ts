@@ -425,4 +425,36 @@ describe('LinkedIn Feed DOM Translation Test', () => {
     // 验证文本节点已更新
     expect(btn.textContent).toContain('消息');
   });
+
+  it('14. LinkedIn 中文界面下包含本地化公司标签 (如山姆会员店/沃尔玛) 的英文长帖绝不误判为已翻译', () => {
+    const app = doc.getElementById('app')!;
+    app.innerHTML = `
+      <div class="feed-shared-update-v2">
+        <div class="feed-shared-update-v2__description-wrapper">
+          <div class="feed-shared-inline-show-more-text feed-shared-update-v2__description">
+            <div class="update-components-text relative">
+              <span dir="ltr">
+                <span class="break-words">
+                  <span>Since becoming CEO 10 months ago, my top priority has been listening to members. I have heard a lot of great ideas and feedback, but the thing I have heard most from members is they would like for their Sams Club membership to include Walmart+. As a busy mom who shops both </span>
+                  <a class="ember-view" href="/company/sams-club">山姆会员店</a>
+                  <span> and </span>
+                  <a class="ember-view" href="/company/walmart">沃尔玛</a>
+                  <span>, I agree...Read more here: </span>
+                  <a class="ember-view" href="https://lnkd.in/efndBi2P">https://lnkd.in/efndBi2P</a>
+                </span>
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    const blocks = extractTranslatableBlocks(doc, 'zh-CN');
+    expect(blocks.length).toBeGreaterThan(0);
+    const postBlock = blocks.find(b => b.originalText.includes('listening to members'));
+    expect(postBlock).toBeDefined();
+    expect(postBlock?.originalText).toContain('Since becoming CEO 10 months ago');
+    expect(postBlock?.originalText).toContain('<x0>山姆会员店</x0>');
+    expect(postBlock?.originalText).toContain('<x1>沃尔玛</x1>');
+  });
 });
