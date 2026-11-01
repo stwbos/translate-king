@@ -859,9 +859,9 @@ document.addEventListener(
         /更多|展开|see more|show more/i.test((target.closest('button')?.textContent || '').trim()));
 
     if (isExpandTrigger) {
-      // 找到对应的帖子容器，重置其翻译标记以便重新提取展开后的完整长文本
+      // 找到对应的帖子顶层卡片，确保即使内部子容器被 React/Ember 销毁替换，卡片依然有效
       const postCard = target.closest(
-        '.feed-shared-update-v2, .occludable-update, [data-view-name*="update"], [data-id*="urn:li:activity"], .feed-shared-inline-show-more-text, .update-components-text'
+        '.feed-shared-update-v2, .occludable-update, [data-view-name*="update"], [data-id*="urn:li:activity"], [data-urn*="activity"], .feed-shared-inline-show-more-text, .update-components-text'
       ) as HTMLElement | null;
       if (postCard) {
         postCard.querySelectorAll('[data-tk-translated], [data-tk-replaced], [data-tk-id], [data-tk-loading], .translate-king-wrapper').forEach((n) => {
@@ -877,6 +877,13 @@ document.addEventListener(
         setTimeout(() => {
           if (isPageTranslated && isExtensionValid()) {
             if (postCard && typeof postCard.isConnected === 'boolean' && postCard.isConnected) {
+              postCard.querySelectorAll('[data-tk-translated], [data-tk-replaced], [data-tk-id], [data-tk-loading], .translate-king-wrapper').forEach((n) => {
+                n.removeAttribute('data-tk-translated');
+                n.removeAttribute('data-tk-replaced');
+                n.removeAttribute('data-tk-id');
+                n.removeAttribute('data-tk-loading');
+                if (n.classList.contains('translate-king-wrapper')) n.remove();
+              });
               const pending = extractTranslatableBlocks(postCard, activeTargetLang);
               if (pending.length > 0) {
                 pending.forEach((b) => injectLoadingState(b, activeTranslationMode));
@@ -892,13 +899,13 @@ document.addEventListener(
 
     // 智能原位补译：若用户点击了任何尚未成功翻译的帖子或段落（例如刚被展开或动态挂载的遗漏内容），立即定向补译！
     const untranslatedPost = target.closest(
-      '.update-components-text, .feed-shared-inline-show-more-text, .feed-shared-update-v2__description, [data-testid="tweetText"]'
+      '.update-components-text, .feed-shared-inline-show-more-text, .feed-shared-update-v2__description, .attributed-text-segment-list__content, [data-test-id*="commentary"], [data-testid="tweetText"]'
     ) as HTMLElement | null;
     if (
       untranslatedPost &&
       !untranslatedPost.querySelector('.translate-king-wrapper, [data-tk-translated], [data-tk-replaced]')
     ) {
-      const parentCard = (target.closest('.feed-shared-update-v2, .occludable-update, [data-view-name*="update"]') as HTMLElement | null) || untranslatedPost;
+      const parentCard = (target.closest('.feed-shared-update-v2, .occludable-update, [data-view-name*="update"], [data-id*="urn:li:activity"], [data-urn*="activity"]') as HTMLElement | null) || untranslatedPost;
       parentCard.querySelectorAll('[data-tk-loading]').forEach((n) => n.removeAttribute('data-tk-loading'));
       const pendingBlocks = extractTranslatableBlocks(parentCard, activeTargetLang);
       if (pendingBlocks.length > 0) {

@@ -36,6 +36,36 @@ function isInlineFormattingTag(el: HTMLElement): boolean {
 }
 
 /**
+ * 校验元素是否为社交媒体或网页正文折叠/展开按钮（如领英 "...更多"、"...see more"、"展开"）
+ * 避免因正文段落内嵌这类展开控制按钮而错误地将整个段落视为复合容器而丢弃
+ */
+export function isExpandToggleButton(el: Element): boolean {
+  if (el.tagName !== 'BUTTON' && el.getAttribute?.('role') !== 'button') {
+    return false;
+  }
+  const cls = (typeof el.className === 'string' ? el.className : '') || '';
+  if (
+    cls.includes('see-more') ||
+    cls.includes('show-more') ||
+    cls.includes('inline-show-more') ||
+    cls.includes('see-more-less-toggle') ||
+    cls.includes('toggle') ||
+    cls.includes('expand')
+  ) {
+    return true;
+  }
+  const aria = el.getAttribute?.('aria-label') || '';
+  if (/more|see more|show more|更多|展开/i.test(aria)) {
+    return true;
+  }
+  const txt = (el.textContent || '').trim();
+  if (/^(…|\.\.\.)?\s*(更多|查看更多|展开|全部|see more|show more|more|less|收起)\s*$/i.test(txt)) {
+    return true;
+  }
+  return false;
+}
+
+/**
  * 判断元素是否为保留原生换行符 (\n) 的评论/帖子/预格式化容器
  */
 function isPreformattedOrCommentElement(el: HTMLElement): boolean {
@@ -145,19 +175,21 @@ export const ATOMIC_BLOCK_SELECTORS = [
   '.reply-content',
 
   // 1.2 LinkedIn (领英) 全架构高容错正文、评论与动态提取规则 (覆盖 /feed/ 与 /feed/foryou/)
+  '[data-test-id*="commentary"]',
+  'p.attributed-text-segment-list__content',
+  '.attributed-text-segment-list__content',
+  '.attributed-text-segment-list',
   '.feed-shared-update-v2 .update-components-text span[dir]',
   '.feed-shared-update-v2 .update-components-text > span',
   '.feed-shared-update-v2 .update-components-text span.break-words',
   '.occludable-update .update-components-text span[dir]',
   '.occludable-update .update-components-text > span',
-  '.occludable-update span[dir]',
   '[data-view-name*="update"] .update-components-text span[dir]',
-  '[data-view-name*="update"] span[dir]',
+  '[data-view-name*="update"] .update-components-text',
   '[data-id*="urn:li:activity"] .update-components-text span[dir]',
-  '[data-id*="urn:li:activity"] span[dir]',
-  '[data-urn*="activity"] span[dir]',
-  '.attributed-text-segment-list__content',
-  '.attributed-text-segment-list',
+  '[data-id*="urn:li:activity"] .update-components-text',
+  '[data-urn*="activity"] .update-components-text span[dir]',
+  '[data-urn*="activity"] .update-components-text',
   '.update-components-text span[dir]',
   '.update-components-text > span',
   '.update-components-text span.break-words',
@@ -511,19 +543,27 @@ export function extractTranslatableBlocks(
       if (shouldIgnoreElement(el)) continue;
 
       // 若 el 内部包含其他块级容器或已标记/翻译的子块，则说明它是外层布局容器，绝不能整体提取
+      // 特例保护：若内部包含的唯一子按钮是折叠展开按钮（如领英 "...更多"），绝不能误判为复合容器而丢弃！
+      const childBlocks = typeof el.querySelectorAll === 'function' ? Array.from(el.querySelectorAll(CHILD_BLOCK_SELECTOR)) : [];
+      const hasRealChildBlocks = childBlocks.some((child) => !isExpandToggleButton(child));
       if (
-        typeof el.querySelector === 'function' &&
-        (el.querySelector(CHILD_BLOCK_SELECTOR) || el.querySelector('.translate-king-wrapper, [data-tk-replaced]'))
+        (typeof el.querySelector === 'function' &&
+          el.querySelector('.translate-king-wrapper, [data-tk-replaced]')) ||
+        hasRealChildBlocks
       ) {
         continue;
       }
 
       // 若 el 是 span 或 a，且其直接父级 div/li 也是叶子容器，则跳过子级，让父级整体提取整句
+      const parentHasRealChildBlocks =
+        el.parentElement && typeof el.parentElement.querySelectorAll === 'function'
+          ? Array.from(el.parentElement.querySelectorAll(CHILD_BLOCK_SELECTOR)).some((c) => !isExpandToggleButton(c))
+          : false;
       if (
         (el.tagName === 'SPAN' || el.tagName === 'A') &&
         el.parentElement &&
         typeof el.parentElement.querySelector === 'function' &&
-        !el.parentElement.querySelector(CHILD_BLOCK_SELECTOR) &&
+        !parentHasRealChildBlocks &&
         !el.parentElement.querySelector('.translate-king-wrapper, [data-tk-replaced]')
       ) {
         continue;
@@ -567,8 +607,15 @@ function processElement(
   const clone = el.cloneNode(true) as HTMLElement;
   if (typeof clone.querySelectorAll === 'function') {
     clone.querySelectorAll(
-      '.translate-king-wrapper, style, script, noscript, .visually-hidden, .sr-only, .feed-shared-inline-show-more-text__see-more-less-toggle, [class*="see-more"]'
+      '.translate-king-wrapper, style, script, noscript, .visually-hidden, .sr-only, .feed-shared-inline-show-more-text__see-more-less-toggle, [class*="see-more"], [class*="show-more"], [data-anonymize*="see-more"]'
     ).forEach((n) => n.remove());
+
+    // 彻底清除所有折叠展开按钮（如 “…更多”、“...see more”），防止按钮文本混入正文
+    clone.querySelectorAll('button, [role="button"]').forEach((btn) => {
+      if (isExpandToggleButton(btn)) {
+        btn.remove();
+      }
+    });
 
     // 社交媒体适配：仅对真正的 Emoji 图标保留其 alt 字符，绝不将头像 (如 "Square头像") 或角标混入文本
     clone.querySelectorAll('img').forEach((img) => {
@@ -651,12 +698,15 @@ function processElement(
     return;
   }
 
-  // 严格防卫：任何含有嵌套卡片、子按钮、已标记/已替换子元素、或复杂组件的复合外层容器，绝不能作为单一片段收录
+  // 严格防卫：任何含有嵌套卡片、无关操作按钮（除折叠展开更多按钮外）、已标记/已替换子元素、或复杂组件的复合外层容器，绝不能作为单一片段收录
+  const allChildButtons = typeof el.querySelectorAll === 'function' ? Array.from(el.querySelectorAll('button')) : [];
+  const hasUnrelatedChildButtons = allChildButtons.some((b) => !isExpandToggleButton(b));
   if (
     typeof el.querySelector === 'function' &&
     (el.querySelector('[data-tk-id], [data-tk-replaced]') ||
+      hasUnrelatedChildButtons ||
       el.querySelector(
-        'button:not(.feed-shared-inline-show-more-text__see-more-less-toggle):not([class*="see-more"]), [data-testid$="-follow"], [data-testid="UserCell"], [data-testid="tweet"], article'
+        '[data-testid$="-follow"], [data-testid="UserCell"], [data-testid="tweet"], article'
       ) ||
       (el.querySelector('[data-testid="User-Name"]') && el.getAttribute('data-testid') !== 'User-Name') ||
       ((el.tagName === 'BUTTON' ||

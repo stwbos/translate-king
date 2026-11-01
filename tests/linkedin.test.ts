@@ -499,4 +499,65 @@ describe('LinkedIn Feed DOM Translation Test', () => {
     expect(blocks2.length).toBe(1);
     expect(blocks2[0].originalText).toBe('Short intro text before expanding... Full extended story and complete article text now visible!');
   });
+
+  it('16. LinkedIn 现代内联折叠帖子（包含 inline-show-more-text__button 及 "…更多"）首屏自动提取，绝不丢弃', () => {
+    const app = doc.getElementById('app')!;
+    app.innerHTML = `
+      <div class="occludable-update feed-shared-update-v2 ember-view">
+        <div class="feed-shared-inline-show-more-text feed-shared-update-v2__description">
+          <div class="update-components-text relative">
+            <span class="break-words">
+              Here is an interesting observation about retail tech leadership in 2026. Companies are adopting agentic workflows faster than ever before.
+              <button class="inline-show-more-text__button artdeco-button artdeco-button--muted" type="button">
+                <span>…更多</span>
+              </button>
+            </span>
+          </div>
+        </div>
+      </div>
+    `;
+
+    const blocks = extractTranslatableBlocks(doc, 'zh-CN');
+    expect(blocks.length).toBe(1);
+    expect(blocks[0].originalText).toContain('Here is an interesting observation');
+    // 确保按钮内部的“…更多”已彻底从译文提取文本中剥离
+    expect(blocks[0].originalText).not.toContain('更多');
+  });
+
+  it('17. LinkedIn 短英文帖子内含本地化中文实体标签时，绝不因汉字占优而误判为中文', () => {
+    const app = doc.getElementById('app')!;
+    app.innerHTML = `
+      <div class="feed-shared-update-v2">
+        <div class="update-components-text">
+          <span class="break-words">
+            Welcome to our new partner <a class="app-aware-link" href="/company/sams-club">山姆会员店</a> team!
+          </span>
+        </div>
+      </div>
+    `;
+
+    const blocks = extractTranslatableBlocks(doc, 'zh-CN');
+    expect(blocks.length).toBe(1);
+    expect(blocks[0].originalText).toContain('Welcome to our new partner');
+    expect(blocks[0].originalText).toContain('<x0>山姆会员店</x0>');
+  });
+
+  it('18. LinkedIn 现代 attributed-text-segment-list__content 架构提取', () => {
+    const app = doc.getElementById('app')!;
+    app.innerHTML = `
+      <div class="attributed-text-segment-list__container">
+        <p class="attributed-text-segment-list__content text-color-text break-words" dir="ltr" data-test-id="main-feed-activity-card__commentary">
+          State of the art multimodal reasoning is transforming enterprise search workflows.
+          <button class="feed-shared-inline-show-more-text__see-more-less-toggle" type="button">
+            <span>…更多</span>
+          </button>
+        </p>
+      </div>
+    `;
+
+    const blocks = extractTranslatableBlocks(doc, 'zh-CN');
+    expect(blocks.length).toBe(1);
+    expect(blocks[0].originalText).toBe('State of the art multimodal reasoning is transforming enterprise search workflows.');
+    expect(blocks[0].originalText).not.toContain('更多');
+  });
 });

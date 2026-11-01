@@ -445,6 +445,24 @@ export function isAlreadyInTargetLanguage(text: string, targetLang?: string): bo
     return false;
   }
 
+  // 1. 核心解耦：提取占位符之外的正文主体文本
+  // （<xN>...</xN> 内包含的是领英/推特本地化的实体链接/提及，如 <x0>山姆会员店</x0>，不能代表正文的语言属性！）
+  const surroundingText = text
+    .replace(/<x\d+[^>]*>[\s\S]*?<\/x\d+>/gi, ' ')
+    .replace(/@[\w_.-]+/g, '')
+    .replace(/https?:\/\/\S+/gi, '')
+    .trim();
+
+  const surroundingForeignWords = surroundingText.match(/[a-zA-Z\u0400-\u04FF\u3040-\u30FF\uAC00-\uD7AF]{2,}/g) || [];
+  const surroundingCjkCount = (surroundingText.match(/[\u4e00-\u9fa5]/g) || []).length;
+
+  // 如果正文外部拥有至少 2 个外文词，且正文外部没有任何汉字（或汉字数远少于外文词），
+  // 无论实体标签内包含多少汉字（如“山姆会员店”、“沃尔玛”），这必定是一篇包含本地化链接的外文帖子，绝不能跳过！
+  if (surroundingForeignWords.length >= 2 && surroundingCjkCount === 0) {
+    return false;
+  }
+
+  // 2. 针对包含占位符内部内容的完整干净文本检测
   const clean = text
     .replace(/<\/?x\d+[^>]*>/gi, '')
     .replace(/@[\w_.-]+/g, '')
@@ -455,13 +473,12 @@ export function isAlreadyInTargetLanguage(text: string, targetLang?: string): bo
   if (cjkCount === 0) return false;
 
   const foreignWords = clean.match(/[a-zA-Z\u0400-\u04FF\u3040-\u30FF\uAC00-\uD7AF]{2,}/g) || [];
-  // 1. 纯中文文本（不含任何连续外文单词，如 "建立人脉"、"全部显示"、"回复"、"赞"）
+  // 纯中文文本（不含任何连续外文单词，如 "建立人脉"、"全部显示"、"回复"、"赞"）
   if (foreignWords.length === 0) return true;
 
   const foreignCharCount = foreignWords.reduce((sum, w) => sum + w.length, 0);
 
-  // 2. 关键防护：若外文词汇 >= 4 个，或者外文字符数 > 25，说明存在未翻译的外文长句或长段落
-  // （典型场景：英文帖子内含领英本地化的“山姆会员店”、“沃尔玛”等少量中文标签，绝不能判定为已是目标语言！）
+  // 3. 关键防护：若外文词汇 >= 4 个，或者外文字符数 > 25，说明存在未翻译的外文长句或长段落
   if (foreignWords.length >= 4 || foreignCharCount > 25) {
     // 仅在中文字符数处于压倒性优势 (如中文正文 >= 外文字符 * 1.5 且外文词 < 8) 时，才视为中文标题混入少量英文专有名词
     if (cjkCount >= foreignCharCount * 1.5 && foreignWords.length < 8) {
@@ -470,7 +487,7 @@ export function isAlreadyInTargetLanguage(text: string, targetLang?: string): bo
     return false;
   }
 
-  // 3. 短文本/标题：若外文仅为 1~3 个专有名词（如 "JavaScript初学者教程"、"iPhone 16 评测"），且中文数占优，则视为已是中文
+  // 4. 短文本/标题：若外文仅为 1~3 个专有名词（如 "JavaScript初学者教程"、"iPhone 16 评测"），且中文数占优，则视为已是中文
   if (cjkCount >= 3 && cjkCount >= foreignCharCount * 0.4) {
     return true;
   }

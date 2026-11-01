@@ -53,10 +53,15 @@ br[data-tk-hidden-br="true"] {
 .feed-shared-update-v2__description,
 .feed-shared-text-view,
 .feed-shared-main-content,
+.attributed-text-segment-list,
+.attributed-text-segment-list__container,
+.attributed-text-segment-list__content,
+[data-test-id*="commentary"],
 .comments-comment-item-content-body,
 .comments-reply-item-content-body,
 .update-components-actor__description,
-.update-components-actor__sub-description {
+.update-components-actor__sub-description,
+[data-tk-translated="true"] {
   -webkit-line-clamp: unset !important;
   line-clamp: unset !important;
   max-height: none !important;
