@@ -850,31 +850,61 @@ document.addEventListener(
       });
     }
 
-    // 针对内容展开与动态流交互：如 LinkedIn "...see more" / 评论展开 / 展开更多
-    const isExpandTrigger = target.closest(
-      '.feed-shared-inline-show-more-text__see-more-less-toggle, button.see-more, button[class*="see-more"], button[aria-label*="more" i], button[aria-label*="展开" i], .feed-shared-control-menu'
-    );
+    // 针对内容展开与动态流交互：如 LinkedIn "...see more" / 评论展开 / "...更多" / "...查看更多"
+    const isExpandTrigger =
+      target.closest(
+        '.feed-shared-inline-show-more-text__see-more-less-toggle, button.see-more, button[class*="see-more"], button[class*="show-more"], button[aria-label*="more" i], button[aria-label*="展开" i], button[aria-label*="更多" i], .feed-shared-control-menu, .inline-show-more-text__button, [data-anonymize="inline-show-more-text-see-more-less-toggle"]'
+      ) ||
+      ((target.tagName === 'BUTTON' || Boolean(target.closest('button'))) &&
+        /更多|展开|see more|show more/i.test((target.closest('button')?.textContent || '').trim()));
+
     if (isExpandTrigger) {
       // 找到对应的帖子容器，重置其翻译标记以便重新提取展开后的完整长文本
       const postCard = target.closest(
         '.feed-shared-update-v2, .occludable-update, [data-view-name*="update"], [data-id*="urn:li:activity"], .feed-shared-inline-show-more-text, .update-components-text'
-      );
+      ) as HTMLElement | null;
       if (postCard) {
-        postCard.querySelectorAll('[data-tk-translated], [data-tk-replaced], [data-tk-id], .translate-king-wrapper').forEach((n) => {
+        postCard.querySelectorAll('[data-tk-translated], [data-tk-replaced], [data-tk-id], [data-tk-loading], .translate-king-wrapper').forEach((n) => {
           n.removeAttribute('data-tk-translated');
           n.removeAttribute('data-tk-replaced');
           n.removeAttribute('data-tk-id');
+          n.removeAttribute('data-tk-loading');
           if (n.classList.contains('translate-king-wrapper')) n.remove();
         });
       }
-      const expandWaves = [30, 100, 250, 600];
+      const expandWaves = [30, 80, 180, 400, 800];
       expandWaves.forEach((w) => {
         setTimeout(() => {
           if (isPageTranslated && isExtensionValid()) {
+            if (postCard && typeof postCard.isConnected === 'boolean' && postCard.isConnected) {
+              const pending = extractTranslatableBlocks(postCard, activeTargetLang);
+              if (pending.length > 0) {
+                pending.forEach((b) => injectLoadingState(b, activeTranslationMode));
+                translateAndMountBlocks(pending, activeTargetLang);
+                return;
+              }
+            }
             processDynamicMutations(0);
           }
         }, w);
       });
+    }
+
+    // 智能原位补译：若用户点击了任何尚未成功翻译的帖子或段落（例如刚被展开或动态挂载的遗漏内容），立即定向补译！
+    const untranslatedPost = target.closest(
+      '.update-components-text, .feed-shared-inline-show-more-text, .feed-shared-update-v2__description, [data-testid="tweetText"]'
+    ) as HTMLElement | null;
+    if (
+      untranslatedPost &&
+      !untranslatedPost.querySelector('.translate-king-wrapper, [data-tk-translated], [data-tk-replaced]')
+    ) {
+      const parentCard = (target.closest('.feed-shared-update-v2, .occludable-update, [data-view-name*="update"]') as HTMLElement | null) || untranslatedPost;
+      parentCard.querySelectorAll('[data-tk-loading]').forEach((n) => n.removeAttribute('data-tk-loading'));
+      const pendingBlocks = extractTranslatableBlocks(parentCard, activeTargetLang);
+      if (pendingBlocks.length > 0) {
+        pendingBlocks.forEach((b) => injectLoadingState(b, activeTranslationMode));
+        translateAndMountBlocks(pendingBlocks, activeTargetLang);
+      }
     }
   },
   true

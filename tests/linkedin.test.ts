@@ -457,4 +457,46 @@ describe('LinkedIn Feed DOM Translation Test', () => {
     expect(postBlock?.originalText).toContain('<x0>山姆会员店</x0>');
     expect(postBlock?.originalText).toContain('<x1>沃尔玛</x1>');
   });
+
+  it('15. LinkedIn 帖子展开流程（包含 "...更多" 按钮，展开后重置旧标记并提取完整长文本）', () => {
+    const app = doc.getElementById('app')!;
+    // 模拟首屏折叠态帖子
+    app.innerHTML = `
+      <div class="feed-shared-update-v2">
+        <div class="feed-shared-inline-show-more-text">
+          <div class="update-components-text">
+            <span dir="ltr">
+              <span class="break-words">
+                <span>Short intro text before expanding...</span>
+              </span>
+            </span>
+            <button class="feed-shared-inline-show-more-text__see-more-less-toggle" type="button">
+              <span>…查看更多</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    // 1. 首屏翻译折叠态短正文
+    const blocks1 = extractTranslatableBlocks(doc, 'zh-CN');
+    expect(blocks1.length).toBe(1);
+    expect(blocks1[0].originalText).toContain('Short intro text before expanding');
+    injectTranslation(blocks1[0], '展开前的短简介文本...', 'bilingual');
+
+    // 2. 模拟用户点击 "...查看更多"，文本展开为长正文
+    const textWrapper = app.querySelector('.update-components-text')!;
+    textWrapper.innerHTML = `
+      <span dir="ltr">
+        <span class="break-words">
+          <span>Short intro text before expanding... Full extended story and complete article text now visible!</span>
+        </span>
+      </span>
+    `;
+
+    // 3. 提取展开后的新内容
+    const blocks2 = extractTranslatableBlocks(app, 'zh-CN');
+    expect(blocks2.length).toBe(1);
+    expect(blocks2[0].originalText).toBe('Short intro text before expanding... Full extended story and complete article text now visible!');
+  });
 });
