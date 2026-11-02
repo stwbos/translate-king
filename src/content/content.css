@@ -47,8 +47,10 @@ br[data-tk-hidden-br="true"] {
 }
 
 /* LinkedIn (领英) 动态正文、评论与排版防截断适配 (覆盖 /feed/ 与 /feed/foryou/) */
-[class*="feed-shared-inline-show-more-text"],
-[class*="update-components-text"],
+div[class*="feed-shared-inline-show-more-text"],
+p[class*="feed-shared-inline-show-more-text"],
+div[class*="update-components-text"],
+p[class*="update-components-text"],
 .feed-shared-update-v2__description-wrapper,
 .feed-shared-update-v2__description,
 .feed-shared-text-view,
@@ -71,19 +73,67 @@ br[data-tk-hidden-br="true"] {
   -webkit-box-orient: unset !important;
 }
 
+/* 领英展开按钮与内联控制条：必须严格保持其原生 inline/inline-block 状态与可点击响应，绝不能被父级或通用规则变成 block */
+button.feed-shared-inline-show-more-text__see-more-less-toggle,
+button.inline-show-more-text__button,
+button[class*="see-more"],
+button[class*="show-more"],
+[data-anonymize="inline-show-more-text-see-more-less-toggle"],
+.feed-shared-inline-show-more-text__see-more-less-toggle-text {
+  display: inline-block !important;
+  pointer-events: auto !important;
+  cursor: pointer !important;
+  position: relative !important;
+  z-index: 10 !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+
 [data-view-name*="update"] .translate-king-wrapper,
 .occludable-update .translate-king-wrapper,
 [data-id*="urn:li:activity"] .translate-king-wrapper,
 [data-urn*="activity"] .translate-king-wrapper,
 .feed-shared-update-v2 .translate-king-wrapper,
 .update-components-text .translate-king-wrapper,
-[class*="feed-shared-inline-show-more-text"] .translate-king-wrapper,
+div[class*="feed-shared-inline-show-more-text"] .translate-king-wrapper,
 .comments-comment-item .translate-king-wrapper,
 .update-components-actor__meta .translate-king-wrapper {
   margin-top: 6px !important;
   margin-bottom: 4px !important;
   display: block !important;
   clear: both !important;
+}
+
+/* LinkedIn (领英) 私信聊天 (Messaging) 与对话气泡双语排版适配 */
+.msg-s-event-listitem .translate-king-wrapper,
+.msg-s-event-listitem__body .translate-king-wrapper,
+.msg-s-event-listitem__message-bubble .translate-king-wrapper,
+.msg-overlay-conversation-bubble .translate-king-wrapper,
+.msg-conversation-card .translate-king-wrapper,
+.msg-thread .translate-king-wrapper {
+  margin-top: 4px !important;
+  margin-bottom: 2px !important;
+  display: block !important;
+  clear: both !important;
+}
+
+.msg-s-event-listitem .translate-king-wrapper .translate-king-text,
+.msg-s-event-listitem__body .translate-king-wrapper .translate-king-text,
+.msg-s-event-listitem__message-bubble .translate-king-wrapper .translate-king-text,
+.msg-overlay-conversation-bubble .translate-king-wrapper .translate-king-text,
+.msg-conversation-card .translate-king-wrapper .translate-king-text,
+.msg-thread .translate-king-wrapper .translate-king-text {
+  font-size: 0.9em !important;
+  line-height: 1.4 !important;
+  padding: 2px 6px !important;
+  border-radius: 4px !important;
+  word-break: break-word !important;
+}
+
+.msg-s-event-listitem--me .translate-king-wrapper .translate-king-text {
+  color: #ffffff !important;
+  background: rgba(255, 255, 255, 0.22) !important;
+  border-left: 3px solid #ffffff !important;
 }
 
 /* X / Twitter 私信聊天气泡内嵌双语排版适配 */

@@ -9,8 +9,11 @@ import {
   shouldIgnoreElement,
   isValidTranslatableText,
   isElementEffectivelyTranslated,
-  isAlreadyInTargetLanguage
+  isAlreadyInTargetLanguage,
+  isExpandToggleButton
 } from './filter';
+
+export { isExpandToggleButton };
 
 export interface TranslatableBlock {
   id: string;
@@ -35,35 +38,7 @@ function isInlineFormattingTag(el: HTMLElement): boolean {
   return false;
 }
 
-/**
- * 校验元素是否为社交媒体或网页正文折叠/展开按钮（如领英 "...更多"、"...see more"、"展开"）
- * 避免因正文段落内嵌这类展开控制按钮而错误地将整个段落视为复合容器而丢弃
- */
-export function isExpandToggleButton(el: Element): boolean {
-  if (el.tagName !== 'BUTTON' && el.getAttribute?.('role') !== 'button') {
-    return false;
-  }
-  const cls = (typeof el.className === 'string' ? el.className : '') || '';
-  if (
-    cls.includes('see-more') ||
-    cls.includes('show-more') ||
-    cls.includes('inline-show-more') ||
-    cls.includes('see-more-less-toggle') ||
-    cls.includes('toggle') ||
-    cls.includes('expand')
-  ) {
-    return true;
-  }
-  const aria = el.getAttribute?.('aria-label') || '';
-  if (/more|see more|show more|更多|展开/i.test(aria)) {
-    return true;
-  }
-  const txt = (el.textContent || '').trim();
-  if (/^(…|\.\.\.)?\s*(更多|查看更多|展开|全部|see more|show more|more|less|收起)\s*$/i.test(txt)) {
-    return true;
-  }
-  return false;
-}
+
 
 /**
  * 判断元素是否为保留原生换行符 (\n) 的评论/帖子/预格式化容器
@@ -426,6 +401,125 @@ function extractTwitterConversationRow(
 }
 
 /**
+ * 阶段 0.2：LinkedIn (领英) 私信聊天气泡 (Messaging Events) 高精度专属提取器
+ * 精确穿透 Ember.js / React 嵌套组件，从 .msg-s-event-listitem 中提取正文气泡，
+ * 彻底过滤头像、发件人姓名、时间戳、操作菜单按钮与反应表情
+ */
+function extractLinkedInDmEntry(
+  entry: HTMLElement,
+  blocks: TranslatableBlock[],
+  processedElements: Set<HTMLElement>,
+  targetLang?: string
+): void {
+  if (processedElements.has(entry) || isElementEffectivelyTranslated(entry)) return;
+  if (shouldIgnoreElement(entry)) return;
+
+  // 严禁提取私信聊天输入框与消息发送表单
+  if (
+    entry.closest?.('.msg-form, .msg-form__msg-content-container, [contenteditable="true"]') ||
+    entry.querySelector?.('.msg-form__contenteditable')
+  ) {
+    return;
+  }
+
+  // 将 entry 内的元信息容器（发件人、时间戳、头像）及其全部子元素加入 processedElements，防止 Stage 2 兜底扫描将其作为孤立文本提取
+  entry.querySelectorAll<HTMLElement>(
+    '.msg-s-message-group__meta, .msg-s-message-group__name, .msg-s-event-listitem__profile-picture, time, .msg-s-message-group__timestamp'
+  ).forEach((n) => {
+    processedElements.add(n);
+    if (typeof n.querySelectorAll === 'function') {
+      n.querySelectorAll<HTMLElement>('*').forEach((child) => processedElements.add(child));
+    }
+  });
+
+  // 1. 优先定位 LinkedIn 官方标准正文容器 .msg-s-event-listitem__body
+  const bodyEl =
+    entry.querySelector<HTMLElement>('.msg-s-event-listitem__body') ||
+    (entry.classList.contains('msg-s-event-listitem__body') ? entry : null);
+
+  if (bodyEl && !processedElements.has(bodyEl) && !isElementEffectivelyTranslated(bodyEl)) {
+    // 检查 bodyEl 内部是否包含 <p> 段落
+    const paragraphs = Array.from(bodyEl.querySelectorAll<HTMLElement>('p'));
+    if (paragraphs.length > 0) {
+      for (const p of paragraphs) {
+        if (!processedElements.has(p) && !isElementEffectivelyTranslated(p) && !shouldIgnoreElement(p)) {
+          processElement(p, blocks, processedElements, targetLang);
+        }
+      }
+      return;
+    }
+
+    // 若无内嵌段落，直接处理 bodyEl
+    processElement(bodyEl, blocks, processedElements, targetLang);
+    return;
+  }
+
+  // 2. 兜底扫描：若无 .msg-s-event-listitem__body，寻找气泡内的有效正文容器
+  const bubble = entry.querySelector<HTMLElement>('.msg-s-event-listitem__message-bubble');
+  const targetRoot = bubble || entry;
+
+  const candidatePars = Array.from(targetRoot.querySelectorAll<HTMLElement>('p, span[dir], div[dir]'));
+  let foundCandidate = false;
+  for (const cand of candidatePars) {
+    if (processedElements.has(cand) || isElementEffectivelyTranslated(cand)) continue;
+    if (
+      cand.closest(
+        'time, .msg-s-message-group__meta, .msg-s-event-listitem__profile-picture, button, .artdeco-button'
+      )
+    ) {
+      continue;
+    }
+    if (cand.querySelector('p, span[dir], div[dir]')) continue;
+
+    const text = (cand.textContent || '').trim();
+    if (isValidTranslatableText(text)) {
+      processElement(cand, blocks, processedElements, targetLang);
+      foundCandidate = true;
+    }
+  }
+  if (foundCandidate) return;
+
+  // 3. 终极叶子容器扫描
+  const leaves = Array.from(targetRoot.querySelectorAll<HTMLElement>('p, span, div'));
+  for (const leaf of leaves) {
+    if (processedElements.has(leaf) || isElementEffectivelyTranslated(leaf)) continue;
+    if (
+      leaf.closest(
+        'time, .msg-s-message-group__meta, .msg-s-event-listitem__profile-picture, button, .artdeco-button, svg'
+      )
+    ) {
+      continue;
+    }
+    if (leaf.querySelector('p, span, div, button, time, svg')) continue;
+
+    const text = (leaf.textContent || '').trim();
+    if (isValidTranslatableText(text)) {
+      processElement(leaf, blocks, processedElements, targetLang);
+    }
+  }
+}
+
+/**
+ * 阶段 0.3：LinkedIn (领英) 私信会话列表卡片 (Conversation Cards) 高精度提取器
+ */
+function extractLinkedInConversationRow(
+  conv: HTMLElement,
+  blocks: TranslatableBlock[],
+  processedElements: Set<HTMLElement>,
+  targetLang?: string
+): void {
+  if (processedElements.has(conv) || isElementEffectivelyTranslated(conv)) return;
+  if (shouldIgnoreElement(conv)) return;
+
+  const snippet = conv.querySelector<HTMLElement>(
+    '.msg-conversation-card__message-snippet-body, .msg-conversation-listitem__summary-snippet'
+  );
+  if (snippet && !processedElements.has(snippet) && !isElementEffectivelyTranslated(snippet)) {
+    processElement(snippet, blocks, processedElements, targetLang);
+  }
+}
+
+/**
  * 递归收集指定根节点及其下所有 Web Components 的 open ShadowRoot
  * 确保对 Bilibili 评论区、Reddit 等复杂 Shadow DOM 架构进行 100% 穿透覆盖
  */
@@ -505,6 +599,28 @@ export function extractTranslatableBlocks(
       );
       for (let i = 0; i < conversationRows.length; i++) {
         extractTwitterConversationRow(conversationRows[i], blocks, processedElements);
+      }
+
+      // 阶段 0.2：LinkedIn (领英) 私信聊天 (Messaging) 与对话气泡专属高精度提取引擎
+      const linkedInChatCells = currentRoot.querySelectorAll<HTMLElement>(
+        [
+          '.msg-s-event-listitem',
+          '.msg-s-message-list__event',
+          '.msg-overlay-conversation-bubble .msg-s-event-listitem',
+          '.msg-s-message-list-container .msg-s-event-listitem',
+          '.msg-thread .msg-s-event-listitem',
+          '[data-event-urn]'
+        ].join(',')
+      );
+      for (let i = 0; i < linkedInChatCells.length; i++) {
+        extractLinkedInDmEntry(linkedInChatCells[i], blocks, processedElements, targetLang);
+      }
+
+      const linkedInConvs = currentRoot.querySelectorAll<HTMLElement>(
+        '.msg-conversation-listitem, .msg-conversation-card'
+      );
+      for (let i = 0; i < linkedInConvs.length; i++) {
+        extractLinkedInConversationRow(linkedInConvs[i], blocks, processedElements, targetLang);
       }
     } catch {
       // 容错降级
@@ -712,7 +828,7 @@ function processElement(
       ((el.tagName === 'BUTTON' ||
         (el.getAttribute('role') === 'button' &&
           !el.closest(
-            '[data-testid="messageEntry"], [data-testid="cellInnerDiv"], [data-testid="DMConversation"], [data-testid="DMChatTranscript"]'
+            '[data-testid="messageEntry"], [data-testid="cellInnerDiv"], [data-testid="DMConversation"], [data-testid="DMChatTranscript"], .msg-s-event-listitem, .msg-s-message-list, .msg-overlay-conversation-bubble, .msg-conversation-card, .msg-conversation-listitem'
           ))) &&
         rawText.length > 50))
   ) {

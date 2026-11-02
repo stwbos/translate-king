@@ -4,6 +4,7 @@
 
 import { TranslatableBlock, collectAllRoots } from './extractor';
 import { TranslationMode } from '../../types';
+import { isExpandToggleButton } from './filter';
 
 const SHOW_TEXT_FILTER = typeof NodeFilter !== 'undefined' ? NodeFilter.SHOW_TEXT : 4;
 const savedOriginalNodesMap = new WeakMap<HTMLElement, Node[]>();
@@ -55,7 +56,26 @@ function ensureShadowStyles(shadow: ShadowRoot): void {
 }
 
 /**
- * 安全定位承载有效非空文本的主 TextNode 节点（过滤纯空白字符节点）
+ * 校验文本节点是否属于 root 内部嵌套的展开/更多按钮或已有译文容器，避免在直接替换父级正文模式下被错误抹除
+ */
+function isProtectedChildButtonTextNode(node: Node, root: Node): boolean {
+  const p = node.parentElement;
+  if (!p) return false;
+  if (p.closest('.translate-king-wrapper')) return true;
+
+  const closestBtn = p.closest(
+    'button, [role="button"], .feed-shared-inline-show-more-text__see-more-less-toggle, [class*="see-more"], [class*="show-more"], [data-anonymize="inline-show-more-text-see-more-less-toggle"]'
+  );
+  if (!closestBtn) return false;
+  // 如果 closestBtn 就是正在翻译的目标根元素自身，说明正在翻译该按钮本身，绝不能拒绝其自身文本！
+  if (closestBtn === root) return false;
+
+  // 只有当 closestBtn 是 root 内部的子级展开/更多按钮时，才保护它不被父级正文清空
+  return isExpandToggleButton(closestBtn);
+}
+
+/**
+ * 安全定位承载有效非空文本的主 TextNode 节点（过滤纯空白字符节点与内嵌按钮文本）
  */
 function findPrimaryTextNode(root: Node, doc: Document): Text | null {
   if (typeof doc.createTreeWalker !== 'function') return null;
@@ -63,6 +83,7 @@ function findPrimaryTextNode(root: Node, doc: Document): Text | null {
     const walker = doc.createTreeWalker(root, SHOW_TEXT_FILTER);
     let current: Text | null = null;
     while ((current = walker.nextNode() as Text | null)) {
+      if (isProtectedChildButtonTextNode(current, root)) continue;
       if (current.nodeValue && current.nodeValue.trim().length > 0) {
         return current;
       }
@@ -84,6 +105,7 @@ function collectManagedTextNodes(root: Node, doc: Document): Text[] {
     const walker = doc.createTreeWalker(root, SHOW_TEXT_FILTER);
     let current: Text | null = null;
     while ((current = walker.nextNode() as Text | null)) {
+      if (isProtectedChildButtonTextNode(current, root)) continue;
       if (!foundPrimary) {
         if (current.nodeValue && current.nodeValue.trim().length > 0) {
           foundPrimary = true;
@@ -105,7 +127,7 @@ function isInteractiveButton(el: HTMLElement): boolean {
   if (
     el.getAttribute('role') === 'button' &&
     !el.closest(
-      '[data-testid="messageEntry"], [data-testid="cellInnerDiv"], [data-testid="DMConversation"], [data-testid="DMChatTranscript"]'
+      '[data-testid="messageEntry"], [data-testid="cellInnerDiv"], [data-testid="DMConversation"], [data-testid="DMChatTranscript"], .msg-s-event-listitem, .msg-s-message-list, .msg-overlay-conversation-bubble, .msg-conversation-card, .msg-conversation-listitem'
     ) &&
     (el.textContent || '').trim().length <= 50
   ) {
@@ -374,6 +396,11 @@ export function injectTranslation(
         ['STRONG', 'B', 'EM', 'I', 'SPAN', 'FONT'].includes(firstChildEl.tagName) &&
         firstChildEl.textContent?.trim() === el.textContent?.trim();
 
+      // 智能保留原段落中可能内嵌的展开/收起等操作按钮 (如 LinkedIn "...更多")
+      const preservedButtons = typeof el.querySelectorAll === 'function'
+        ? Array.from(el.querySelectorAll<HTMLElement>('button, [class*="see-more"], [class*="show-more"]'))
+        : [];
+
       while (el.firstChild) {
         el.removeChild(el.firstChild);
       }
@@ -384,6 +411,7 @@ export function injectTranslation(
       } else {
         el.appendChild(fragment);
       }
+      preservedButtons.forEach((btn) => el.appendChild(btn));
 
       el.setAttribute('data-tk-trans-text', translatedText.replace(/<\/?x\d+[^>]*>/gi, ''));
       el.setAttribute('data-tk-replaced', 'true');

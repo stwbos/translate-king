@@ -84,6 +84,38 @@ const PLAYER_SUBTITLE_SELECTORS = [
 ].join(',');
 
 /**
+ * 校验元素是否为社交媒体或网页正文折叠/展开按钮（如领英 "...更多"、"...see more"、"展开"）
+ * 避免因正文段落内嵌这类展开控制按钮而错误地将整个段落视为复合容器而丢弃，并严格杜绝按钮自身被篡改
+ */
+export function isExpandToggleButton(el: Element): boolean {
+  if (el.tagName !== 'BUTTON' && el.getAttribute?.('role') !== 'button') {
+    return false;
+  }
+  // 维基百科目录折叠切换按钮属于核心需翻译的原子按钮，绝不能误判
+  if (el.classList?.contains('vector-toc-toggle') || (typeof el.closest === 'function' && el.closest('.vector-toc-toggle'))) {
+    return false;
+  }
+  const cls = (typeof el.className === 'string' ? el.className : '') || '';
+  if (
+    cls.includes('see-more') ||
+    cls.includes('show-more') ||
+    cls.includes('inline-show-more') ||
+    cls.includes('see-more-less-toggle')
+  ) {
+    return true;
+  }
+  const aria = el.getAttribute?.('aria-label') || '';
+  if (/more|see more|show more|更多|查看更多|展开/i.test(aria)) {
+    return true;
+  }
+  const txt = (el.textContent || '').trim();
+  if (/^(…|\.\.\.)?\s*(更多|查看更多|展开|全部|see more|show more)\s*$/i.test(txt)) {
+    return true;
+  }
+  return false;
+}
+
+/**
  * 校验某个节点上的 loading 锁是否仍然有效（超过 12 秒视为超时失效并自动清理）
  */
 function isLoadingLockActive(el: Element): boolean {
@@ -267,6 +299,17 @@ export function shouldIgnoreElement(element: Element): boolean {
     }
   }
 
+  // 严格杜绝折叠展开更多按钮（如 "...更多"、"...see more"）自身或其子 span 被提取为待翻译正文
+  if (isExpandToggleButton(element)) {
+    return true;
+  }
+  if (typeof element.closest === 'function') {
+    const parentButton = element.closest('button, [role="button"]');
+    if (parentButton && isExpandToggleButton(parentButton)) {
+      return true;
+    }
+  }
+
   // 严格保护社交媒体动态流中的底层操作按钮（点赞/评论/转发/自带查看翻译按钮/展开更多等），
   // 严禁将其提取或篡改内部结构，防止破坏 React/Ember 虚拟 DOM 绑定导致按钮报错或页面卡死
   if (
@@ -277,34 +320,45 @@ export function shouldIgnoreElement(element: Element): boolean {
         'button, [role="button"], .artdeco-button, .feed-shared-social-actions, .feed-shared-see-translation-button, .feed-shared-inline-show-more-text__see-more-less-toggle'
       ))
   ) {
-    const isSpecialNavOrFollow =
-      typeof element.matches === 'function' &&
-      element.matches(
-        '[data-testid$="-follow"], [data-testid$="-unfollow"], [data-testid="tweetButton"], [data-testid="tweetButtonInline"], .vector-toc-toggle'
-      );
-    const closestSpecial =
+    // 保护私信聊天气泡与会话卡片（即使带有 role="button" 或 .artdeco-button 也绝不能被忽略）
+    const isChatMessage =
       typeof element.closest === 'function' &&
-      element.closest('[data-testid$="-follow"], [data-testid$="-unfollow"], [data-testid="tweetButton"]');
+      element.closest(
+        '.msg-s-event-listitem, .msg-s-message-list, .msg-overlay-conversation-bubble, .msg-conversation-card, .msg-conversation-listitem, [data-testid="messageEntry"], [data-testid="cellInnerDiv"], [data-testid="DMConversation"]'
+      );
 
-    if (!isSpecialNavOrFollow && !closestSpecial) {
-      if (
+    if (isChatMessage && element.tagName !== 'BUTTON' && !isExpandToggleButton(element)) {
+      // 允许提取私信聊天正文与摘要
+    } else {
+      const isSpecialNavOrFollow =
+        typeof element.matches === 'function' &&
+        element.matches(
+          '[data-testid$="-follow"], [data-testid$="-unfollow"], [data-testid="tweetButton"], [data-testid="tweetButtonInline"], .vector-toc-toggle'
+        );
+      const closestSpecial =
         typeof element.closest === 'function' &&
-        element.closest(
-          '.feed-shared-update-v2, .occludable-update, [data-view-name*="update"], [data-id*="urn:li:activity"], .comments-comment-item'
-        )
-      ) {
+        element.closest('[data-testid$="-follow"], [data-testid$="-unfollow"], [data-testid="tweetButton"]');
+
+      if (!isSpecialNavOrFollow && !closestSpecial) {
         if (
-          element.tagName === 'BUTTON' ||
-          element.getAttribute?.('role') === 'button' ||
-          element.classList?.contains('artdeco-button') ||
-          element.classList?.contains('feed-shared-see-translation-button') ||
-          element.classList?.contains('feed-shared-inline-show-more-text__see-more-less-toggle') ||
-          (typeof element.closest === 'function' &&
-            element.closest(
-              '.feed-shared-social-actions, .feed-shared-see-translation-button, .feed-shared-inline-show-more-text__see-more-less-toggle'
-            ))
+          typeof element.closest === 'function' &&
+          element.closest(
+            '.feed-shared-update-v2, .occludable-update, [data-view-name*="update"], [data-id*="urn:li:activity"], .comments-comment-item'
+          )
         ) {
-          return true;
+          if (
+            element.tagName === 'BUTTON' ||
+            element.getAttribute?.('role') === 'button' ||
+            element.classList?.contains('artdeco-button') ||
+            element.classList?.contains('feed-shared-see-translation-button') ||
+            element.classList?.contains('feed-shared-inline-show-more-text__see-more-less-toggle') ||
+            (typeof element.closest === 'function' &&
+              element.closest(
+                '.feed-shared-social-actions, .feed-shared-see-translation-button, .feed-shared-inline-show-more-text__see-more-less-toggle'
+              ))
+          ) {
+            return true;
+          }
         }
       }
     }
@@ -346,10 +400,12 @@ export function shouldIgnoreElement(element: Element): boolean {
       // 只有在祖先是非顶层布局容器的小部件时才生效（若包含多段落或动态卡片，说明是外层框架防御）
       const isTopLayout =
         noTransParent.matches?.(
-          'html, body, main, #app, #root, .application-outlet, .scaffold-layout, [data-view-name*="update"], .feed-shared-update-v2, .occludable-update, .msg-thread, .msg-overlay-list-bubble'
+          'html, body, main, #app, #root, .application-outlet, .scaffold-layout, [data-view-name*="update"], .feed-shared-update-v2, .occludable-update, .msg-thread, .msg-overlay-list-bubble, .msg-overlay-conversation-bubble, .msg-convo-wrapper, .msg-s-message-list-container, .msg-conversations-container'
         ) ||
         (typeof noTransParent.querySelectorAll === 'function' &&
-          noTransParent.querySelectorAll('p, article, [data-view-name*="update"], .feed-shared-update-v2, .msg-s-event-listitem').length > 0);
+          noTransParent.querySelectorAll(
+            'p, article, [data-view-name*="update"], .feed-shared-update-v2, .msg-s-event-listitem, .msg-s-message-list__event, .msg-conversation-card'
+          ).length > 0);
       if (!isTopLayout) {
         return true;
       }

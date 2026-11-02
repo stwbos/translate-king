@@ -524,13 +524,18 @@ function startDynamicObserver(): void {
             el.getAttribute?.('data-testid') === 'DMConversation' ||
             el.getAttribute?.('data-testid') === 'DMChatTranscript' ||
             el.classList?.contains('msg-s-event-listitem') ||
+            el.classList?.contains('msg-s-message-list__event') ||
+            el.classList?.contains('msg-s-event-listitem__body') ||
             el.classList?.contains('msg-overlay-conversation-bubble') ||
             el.classList?.contains('msg-thread') ||
+            el.classList?.contains('msg-s-message-list-container') ||
+            el.classList?.contains('msg-conversation-card') ||
+            el.classList?.contains('msg-conversation-listitem') ||
             el.classList?.contains('feed-shared-update-v2') ||
             el.classList?.contains('occludable-update') ||
             (typeof el.querySelector === 'function' &&
               el.querySelector(
-                '[data-testid="messageEntry"], [data-testid="conversation"], [data-testid="cellInnerDiv"], [data-testid="DMConversation"], .msg-s-event-listitem, .msg-thread, .feed-shared-update-v2, .occludable-update'
+                '[data-testid="messageEntry"], [data-testid="conversation"], [data-testid="cellInnerDiv"], [data-testid="DMConversation"], .msg-s-event-listitem, .msg-s-message-list__event, .msg-thread, .msg-overlay-conversation-bubble, .feed-shared-update-v2, .occludable-update'
               ))
           ) {
             isHighPriorityChat = true;
@@ -837,7 +842,7 @@ document.addEventListener(
 
     // 针对私信聊天界面与导航：若点击了具体的聊天会话项或私信入口，启动聊天消息加载专属波段扫描
     const isChatTrigger = target.closest(
-      '[data-testid="conversation"], [data-testid="messageEntry"], [data-testid="cellInnerDiv"], [data-testid="DMConversation"], [data-testid="DMChatTranscript"], [data-testid="AppTabBar_DirectMessage_Link"], a[href*="/messages"], a[href*="/messaging"], .msg-overlay-bubble-header, .msg-conversation-listitem, [aria-label*="私信"], [aria-label*="Messages" i], [aria-label*="消息" i]'
+      '[data-testid="conversation"], [data-testid="messageEntry"], [data-testid="cellInnerDiv"], [data-testid="DMConversation"], [data-testid="DMChatTranscript"], [data-testid="AppTabBar_DirectMessage_Link"], a[href*="/messages"], a[href*="/messaging"], .msg-overlay-bubble-header, .msg-conversation-listitem, .msg-conversation-card, .msg-overlay-conversation-bubble, .msg-thread, .msg-s-message-list-container, [aria-label*="私信"], [aria-label*="Messages" i], [aria-label*="消息" i], button[aria-label*="Message" i], button[aria-label*="私信" i]'
     );
     if (isChatTrigger) {
       const chatWaves = [25, 80, 160, 320, 600, 1200, 2000, 3500];
@@ -859,20 +864,13 @@ document.addEventListener(
         /更多|展开|see more|show more/i.test((target.closest('button')?.textContent || '').trim()));
 
     if (isExpandTrigger) {
-      // 找到对应的帖子顶层卡片，确保即使内部子容器被 React/Ember 销毁替换，卡片依然有效
+      // 核心守卫：绝对禁止在捕获阶段同步修改 DOM！让点击事件完整派发至 LinkedIn Ember/React 原生按钮！
       const postCard = target.closest(
         '.feed-shared-update-v2, .occludable-update, [data-view-name*="update"], [data-id*="urn:li:activity"], [data-urn*="activity"], .feed-shared-inline-show-more-text, .update-components-text'
       ) as HTMLElement | null;
-      if (postCard) {
-        postCard.querySelectorAll('[data-tk-translated], [data-tk-replaced], [data-tk-id], [data-tk-loading], .translate-king-wrapper').forEach((n) => {
-          n.removeAttribute('data-tk-translated');
-          n.removeAttribute('data-tk-replaced');
-          n.removeAttribute('data-tk-id');
-          n.removeAttribute('data-tk-loading');
-          if (n.classList.contains('translate-king-wrapper')) n.remove();
-        });
-      }
-      const expandWaves = [30, 80, 180, 400, 800];
+
+      // 仅在异步 wave 定时器中清除旧标记并重新提取翻译展开后的新内容
+      const expandWaves = [40, 100, 200, 450, 900];
       expandWaves.forEach((w) => {
         setTimeout(() => {
           if (isPageTranslated && isExtensionValid()) {
@@ -895,9 +893,18 @@ document.addEventListener(
           }
         }, w);
       });
+      return; // 核心：展开按钮点击后直接返回，绝不同步执行下方的 untranslatedPost！
     }
 
     // 智能原位补译：若用户点击了任何尚未成功翻译的帖子或段落（例如刚被展开或动态挂载的遗漏内容），立即定向补译！
+    // 严格过滤按钮、超链接、表单控件与展开触发器，避免打断交互
+    if (
+      target.closest('button, a, [role="button"], [role="link"], input, textarea, select, .artdeco-button') ||
+      isExpandTrigger
+    ) {
+      return;
+    }
+
     const untranslatedPost = target.closest(
       '.update-components-text, .feed-shared-inline-show-more-text, .feed-shared-update-v2__description, .attributed-text-segment-list__content, [data-test-id*="commentary"], [data-testid="tweetText"]'
     ) as HTMLElement | null;

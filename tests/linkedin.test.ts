@@ -560,4 +560,116 @@ describe('LinkedIn Feed DOM Translation Test', () => {
     expect(blocks[0].originalText).toBe('State of the art multimodal reasoning is transforming enterprise search workflows.');
     expect(blocks[0].originalText).not.toContain('更多');
   });
+
+  it('19. LinkedIn 帖子在纯译文原地替换模式 (replace) 下，内嵌的 "...更多" 按钮及其文本完整保留', () => {
+    const app = doc.getElementById('app')!;
+    app.innerHTML = `
+      <div class="feed-shared-update-v2">
+        <p class="attributed-text-segment-list__content text-color-text break-words">
+          Building agentic AI tools requires fast response cycles and precise DOM understanding.
+          <button class="feed-shared-inline-show-more-text__see-more-less-toggle" type="button">
+            <span>…查看更多</span>
+          </button>
+        </p>
+      </div>
+    `;
+
+    const blocks = extractTranslatableBlocks(doc, 'zh-CN');
+    expect(blocks.length).toBe(1);
+    expect(blocks[0].originalText).toBe('Building agentic AI tools requires fast response cycles and precise DOM understanding.');
+
+    // 执行直接替换模式翻译
+    injectTranslation(blocks[0], '构建智能体 AI 工具需要极速的响应周期与精准的 DOM 理解能力。', 'replace');
+
+    const p = app.querySelector('p')!;
+    expect(p.textContent).toContain('构建智能体 AI 工具需要极速的响应周期');
+
+    // 关键断言：验证按钮依然完好存在于 DOM 树中，并且按钮文本未被抹除置空！
+    const btn = p.querySelector('button.feed-shared-inline-show-more-less-toggle, button.feed-shared-inline-show-more-text__see-more-less-toggle');
+    expect(btn).not.toBeNull();
+    expect(btn?.textContent?.trim()).toBe('…查看更多');
+  });
+
+  it('20. LinkedIn Messaging (私信聊天界面) Stage 0.2 高精度提取：排除头像与时间，仅提取消息正文', () => {
+    const app = doc.getElementById('app')!;
+    app.innerHTML = `
+      <div class="msg-overlay-conversation-bubble">
+        <div class="msg-s-message-list-container">
+          <ul class="msg-s-message-list">
+            <li class="msg-s-message-list__event">
+              <div class="msg-s-event-listitem msg-s-event-listitem--other">
+                <div class="msg-s-event-listitem__profile-picture">
+                  <img src="avatar.jpg" alt="Satya Nadella" />
+                </div>
+                <div class="msg-s-event-listitem__message-bubble">
+                  <div class="msg-s-message-group__meta">
+                    <span class="msg-s-message-group__name">Satya Nadella</span>
+                    <time class="msg-s-message-group__timestamp">10:45 AM</time>
+                  </div>
+                  <div class="msg-s-event-listitem__body">
+                    <p>Good morning! We would love to discuss the new Chrome extension translation engine.</p>
+                  </div>
+                </div>
+              </div>
+            </li>
+          </ul>
+        </div>
+      </div>
+    `;
+
+    const blocks = extractTranslatableBlocks(doc, 'zh-CN');
+    expect(blocks.length).toBe(1);
+    expect(blocks[0].originalText).toBe('Good morning! We would love to discuss the new Chrome extension translation engine.');
+    expect(blocks[0].originalText).not.toContain('Satya');
+    expect(blocks[0].originalText).not.toContain('10:45 AM');
+
+    // 验证双语模式挂载
+    injectTranslation(blocks[0], '早上好！我们很想讨论一下全新的 Chrome 插件翻译引擎。', 'bilingual');
+    const wrapper = app.querySelector('.translate-king-wrapper');
+    expect(wrapper).not.toBeNull();
+    expect(wrapper?.textContent).toContain('早上好！我们很想讨论一下全新');
+  });
+
+  it('21. LinkedIn Messaging 消息气泡带有 role="button" 时，绝不误判为操作按钮而丢弃', () => {
+    const app = doc.getElementById('app')!;
+    app.innerHTML = `
+      <div class="msg-s-message-list-container">
+        <div class="msg-s-event-listitem">
+          <div class="msg-s-event-listitem__message-bubble" role="button" tabindex="0">
+            <p class="msg-s-event-listitem__body">
+              This is a long message in LinkedIn messaging chat that exceeds fifty characters and has role button on its bubble.
+            </p>
+          </div>
+        </div>
+      </div>
+    `;
+
+    const blocks = extractTranslatableBlocks(doc, 'zh-CN');
+    expect(blocks.length).toBe(1);
+    expect(blocks[0].originalText).toContain('This is a long message in LinkedIn messaging chat');
+  });
+
+  it('22. LinkedIn Messaging 会话列表卡片 (Stage 0.3) 提取最新私信预览摘要', () => {
+    const app = doc.getElementById('app')!;
+    app.innerHTML = `
+      <div class="msg-conversations-container">
+        <ul class="msg-conversations-container__conversations-list">
+          <li class="msg-conversation-listitem">
+            <div class="msg-conversation-card">
+              <h3 class="msg-conversation-card__participant-names">Sundar Pichai</h3>
+              <time class="msg-conversation-card__time-stamp">Yesterday</time>
+              <p class="msg-conversation-card__message-snippet-body">
+                Let us know when you deploy the update to the store.
+              </p>
+            </div>
+          </li>
+        </ul>
+      </div>
+    `;
+
+    const blocks = extractTranslatableBlocks(doc, 'zh-CN');
+    const snippetBlock = blocks.find(b => b.originalText.includes('deploy the update to the store'));
+    expect(snippetBlock).toBeDefined();
+    expect(snippetBlock?.originalText).toBe('Let us know when you deploy the update to the store.');
+  });
 });
