@@ -72,8 +72,7 @@ p[class*="update-components-text"],
 .comments-comment-item-content-body,
 .comments-reply-item-content-body,
 .update-components-actor__description,
-.update-components-actor__sub-description,
-[data-tk-translated="true"] {
+.update-components-actor__sub-description {
   -webkit-line-clamp: unset !important;
   line-clamp: unset !important;
   max-height: none !important;
@@ -81,6 +80,15 @@ p[class*="update-components-text"],
   overflow: visible !important;
   display: block !important;
   -webkit-box-orient: unset !important;
+}
+
+/* 通用已翻译宿主节点：仅解除高度裁剪，绝不篡改原网页的 display (保留 flex / grid / table-cell / list-item 原生布局) */
+[data-tk-translated="true"] {
+  -webkit-line-clamp: unset !important;
+  line-clamp: unset !important;
+  max-height: none !important;
+  height: auto !important;
+  overflow: visible !important;
 }
 
 /* 领英展开按钮与内联控制条：必须严格保持其原生 inline/inline-block 状态与可点击响应，绝不能被父级或通用规则变成 block */

@@ -246,11 +246,13 @@ export const ATOMIC_BLOCK_SELECTORS = [
   'p',
   'blockquote',
   'figcaption',
+  'dd',
+  'dt',
+  'summary',
   '.markdown-body p',
   '.entry-content p',
 
-  // 5. 按钮与独立操作选项
-  'button',
+  // 5. 导航与显式操作链接
   '[data-testid$="-follow"]',
   '[data-testid$="-unfollow"]',
   '[data-testid="SideNav_NewTweet_Button"]',
@@ -271,8 +273,11 @@ export const ATOMIC_BLOCK_SELECTORS = [
   'a[role="tab"]'
 ];
 
+// 阶段 3 独立按钮（必须在所有正文段落与通用文本容器提取完毕后再执行，绝不抢占包含按钮的正文段落！）
+const BUTTON_AND_NAV_SELECTORS = ['button'];
+
 // 保留 BLOCK_SELECTORS 供向后兼容及测试用例使用
-export const BLOCK_SELECTORS = ATOMIC_BLOCK_SELECTORS;
+export const BLOCK_SELECTORS = [...ATOMIC_BLOCK_SELECTORS, ...BUTTON_AND_NAV_SELECTORS];
 
 // 常见复合块级容器选择器（包含这些子元素的容器不能作为叶子文本块）
 const CHILD_BLOCK_SELECTOR = 'div, p, article, section, ul, ol, li, table, form, h1, h2, h3, h4, h5, h6, blockquote, button, [data-testid="tweetText"]';
@@ -659,9 +664,9 @@ export function extractTranslatableBlocks(
       if (shouldIgnoreElement(el)) continue;
 
       // 若 el 内部包含其他块级容器或已标记/翻译的子块，则说明它是外层布局容器，绝不能整体提取
-      // 特例保护：若内部包含的唯一子按钮是折叠展开按钮（如领英 "...更多"），绝不能误判为复合容器而丢弃！
+      // 通用规则：忽略子级中的 button（按钮在克隆提取时会自动剥离），仅当存在真正的子段落块级容器时才视为复合外层容器
       const childBlocks = typeof el.querySelectorAll === 'function' ? Array.from(el.querySelectorAll(CHILD_BLOCK_SELECTOR)) : [];
-      const hasRealChildBlocks = childBlocks.some((child) => !isExpandToggleButton(child));
+      const hasRealChildBlocks = childBlocks.some((child) => child.tagName !== 'BUTTON' && !isExpandToggleButton(child));
       if (
         (typeof el.querySelector === 'function' &&
           el.querySelector('.translate-king-wrapper, [data-tk-replaced]')) ||
@@ -673,7 +678,9 @@ export function extractTranslatableBlocks(
       // 若 el 是 span 或 a，且其直接父级 div/li 也是叶子容器，则跳过子级，让父级整体提取整句
       const parentHasRealChildBlocks =
         el.parentElement && typeof el.parentElement.querySelectorAll === 'function'
-          ? Array.from(el.parentElement.querySelectorAll(CHILD_BLOCK_SELECTOR)).some((c) => !isExpandToggleButton(c))
+          ? Array.from(el.parentElement.querySelectorAll(CHILD_BLOCK_SELECTOR)).some(
+              (c) => c.tagName !== 'BUTTON' && !isExpandToggleButton(c)
+            )
           : false;
       if (
         (el.tagName === 'SPAN' || el.tagName === 'A') &&
@@ -686,6 +693,21 @@ export function extractTranslatableBlocks(
       }
 
       processElement(el, blocks, processedElements, targetLang);
+    }
+
+    // ---------------------------------------------------------
+    // 阶段 3：提取独立按钮与导航控制项（排在正文与通用容器之后，防止内部小按钮抢占或阻断外部段落）
+    // ---------------------------------------------------------
+    for (let i = 0; i < BUTTON_AND_NAV_SELECTORS.length; i += CHUNK_SIZE) {
+      const chunkSelector = BUTTON_AND_NAV_SELECTORS.slice(i, i + CHUNK_SIZE).join(',');
+      try {
+        const btnElements = currentRoot.querySelectorAll<HTMLElement>(chunkSelector);
+        for (let j = 0; j < btnElements.length; j++) {
+          processElement(btnElements[j], blocks, processedElements, targetLang);
+        }
+      } catch {
+        // 容错降级
+      }
     }
   }
 
@@ -726,12 +748,14 @@ function processElement(
       '.translate-king-wrapper, style, script, noscript, .visually-hidden, .sr-only, .feed-shared-inline-show-more-text__see-more-less-toggle, [class*="see-more"], [class*="show-more"], [data-anonymize*="see-more"]'
     ).forEach((n) => n.remove());
 
-    // 彻底清除所有折叠展开按钮（如 “…更多”、“...see more”），防止按钮文本混入正文
-    clone.querySelectorAll('button, [role="button"]').forEach((btn) => {
-      if (isExpandToggleButton(btn)) {
-        btn.remove();
-      }
-    });
+    // 彻底清除段落内部嵌套的按钮（如展开按钮、复制按钮、角标按钮），防止按钮文字混入段落正文或导致段落被拒
+    if (el.tagName !== 'BUTTON') {
+      clone.querySelectorAll('button, [role="button"]').forEach((btn) => {
+        if (btn.tagName === 'BUTTON' || isExpandToggleButton(btn)) {
+          btn.remove();
+        }
+      });
+    }
 
     // 社交媒体适配：仅对真正的 Emoji 图标保留其 alt 字符，绝不将头像 (如 "Square头像") 或角标混入文本
     clone.querySelectorAll('img').forEach((img) => {
@@ -814,13 +838,16 @@ function processElement(
     return;
   }
 
-  // 严格防卫：任何含有嵌套卡片、无关操作按钮（除折叠展开更多按钮外）、已标记/已替换子元素、或复杂组件的复合外层容器，绝不能作为单一片段收录
+  // 严格防卫：任何含有嵌套卡片、多个无关操作按钮、已标记/已替换子元素、或复杂组件的复合外层容器，绝不能作为单一片段收录
+  // 但对于标准语义段落 (P, H1-H6, LI, BLOCKQUOTE, TD, DD, DT)，即使内部带有 1 个内联小按钮（已在 clone 中剥离），也允许正常翻译该段落！
+  const isSemanticParagraph = /^(P|H1|H2|H3|H4|H5|H6|BLOCKQUOTE|LI|TD|TH|DD|DT|FIGCAPTION)$/.test(el.tagName);
   const allChildButtons = typeof el.querySelectorAll === 'function' ? Array.from(el.querySelectorAll('button')) : [];
-  const hasUnrelatedChildButtons = allChildButtons.some((b) => !isExpandToggleButton(b));
+  const unrelatedButtons = allChildButtons.filter((b) => !isExpandToggleButton(b));
+  const hasBlockingChildButtons = isSemanticParagraph ? unrelatedButtons.length > 2 : unrelatedButtons.length > 0;
   if (
     typeof el.querySelector === 'function' &&
     (el.querySelector('[data-tk-id], [data-tk-replaced]') ||
-      hasUnrelatedChildButtons ||
+      hasBlockingChildButtons ||
       el.querySelector(
         '[data-testid$="-follow"], [data-testid="UserCell"], [data-testid="tweet"], article'
       ) ||
