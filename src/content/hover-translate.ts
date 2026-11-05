@@ -163,23 +163,8 @@ export async function toggleSingleParagraphTranslation(
   const rawText = (clone.textContent || '').replace(/\s+/g, ' ').trim();
   if (rawText.length < 2) return false;
 
-  // 智能双向互译：
-  // 1. 原文主要是外文（中文字数占比 < 35%）：若目标语言是 en 或未设置，强制翻译为简体中文 (zh-CN)，确保按 Ctrl 100% 翻成中文！
-  // 2. 原文主要是中文（中文字数占比 >= 35%）：若目标语言也是中文 (zh-CN / zh-TW)，自动互译为英文 (en)！
-  const cjkChars = (rawText.match(/[\u4e00-\u9fa5]/g) || []).length;
-  const nonSpaceLen = rawText.replace(/\s+/g, '').length || 1;
-  const isPredominantlyChinese = cjkChars / nonSpaceLen >= 0.35;
-
-  let effectiveTargetLang: TargetLanguage = targetLang || 'zh-CN';
-  if (isPredominantlyChinese) {
-    if (effectiveTargetLang === 'zh-CN' || effectiveTargetLang === 'zh-TW') {
-      effectiveTargetLang = 'en';
-    }
-  } else {
-    if (effectiveTargetLang === 'en') {
-      effectiveTargetLang = 'zh-CN';
-    }
-  }
+  // 严格遵循用户当前设置的目标语言（例如用户设置为 zh-CN 中文，就 100% 翻译为中文，绝不擅自改成英文！）
+  const effectiveTargetLang: TargetLanguage = targetLang || 'zh-CN';
 
   const block = {
     id: `tk-hover-${Date.now()}`,
@@ -220,8 +205,16 @@ export async function toggleSingleParagraphTranslation(
             return;
           }
           const trans = res.translations[0];
-          if (trans && trans.trim() && trans.trim() !== rawText.trim()) {
-            injectTranslation(block, trans, mode);
+          if (trans && trans.trim()) {
+            injectTranslation(
+              {
+                ...block,
+                // 若用户在中文段落上主动按 Ctrl 且目标语言也是中文，允许原样展开双语对照框供确认
+                originalText: trans.trim() === rawText.trim() ? `${rawText}\u200b` : rawText
+              },
+              trans,
+              mode
+            );
             el.setAttribute('data-tk-hover-translated', 'true');
           } else {
             removeTranslation(el);
