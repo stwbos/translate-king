@@ -57,6 +57,25 @@ function isDedicatedVideoSite(): boolean {
 }
 
 export function openUniversalVideoSummaryPanel(): void {
+  // 打开总结面板前，自动从 HTML5 <video> textTracks 收集全量字幕轨道节点，确保有真实字幕时 100% 能生成总结
+  if (typeof document !== 'undefined') {
+    const videos = Array.from(document.querySelectorAll('video'));
+    for (const v of videos) {
+      if (!v.textTracks) continue;
+      for (let i = 0; i < v.textTracks.length; i++) {
+        const track = v.textTracks[i];
+        if (track.cues && track.cues.length > 0) {
+          for (let j = 0; j < track.cues.length; j++) {
+            const cue = track.cues[j] as any;
+            const text = cue?.text ? String(cue.text).replace(/<[^>]+>/g, '').trim() : '';
+            if (text) {
+              recordObservedVideoCue(text, '');
+            }
+          }
+        }
+      }
+    }
+  }
   if (!universalSummaryPanel) {
     universalSummaryPanel = new YouTubeSummaryPanel(currentTargetLang);
   }
@@ -95,11 +114,38 @@ export function downloadUniversalVideoSrt(): void {
 }
 
 /**
- * 查找页面中的主视频节点及其播放器包裹容器
+ * 判断某个 <video> 及其容器是否真正具备外挂字幕轨道或第三方播放器字幕层
+ * 严格过滤普通网页的无字幕宣传片、背景视频、GIF 短视频，绝不在无字幕视频右上角乱挂按钮！
+ */
+function videoHasRealCaptions(video: HTMLVideoElement, rootDoc: Document): boolean {
+  // 1. 存在主流播放器字幕容器节点 (如 Video.js / Plyr / JWPlayer / DPlayer / Coursera / Udemy 字幕层)
+  if (rootDoc.querySelector(UNIVERSAL_CAPTION_SELECTORS)) {
+    return true;
+  }
+  // 2. <video> 内含显式 <track> 字幕标签
+  if (video.querySelector('track')) {
+    return true;
+  }
+  // 3. HTML5 textTracks 含有有效字幕队列
+  if (video.textTracks && video.textTracks.length > 0) {
+    for (let i = 0; i < video.textTracks.length; i++) {
+      const t = video.textTracks[i];
+      if ((t.cues && t.cues.length > 0) || (t.activeCues && t.activeCues.length > 0)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * 查找页面中具备真实字幕轨道的主视频节点及其播放器包裹容器
  */
 export function findPrimaryVideoContainer(): { video: HTMLVideoElement; container: HTMLElement } | null {
   if (typeof document === 'undefined') return null;
-  const videos = Array.from(document.querySelectorAll('video'));
+  const videos = Array.from(document.querySelectorAll('video')).filter((v) =>
+    videoHasRealCaptions(v, document)
+  );
   if (videos.length === 0) return null;
 
   let bestVideo: HTMLVideoElement | null = null;
@@ -160,7 +206,11 @@ function updateUniversalButtonVisual(btn: HTMLElement, force = false): void {
 export function mountUniversalVideoControls(targetLang: TargetLanguage): boolean {
   if (typeof document === 'undefined') return false;
   const found = findPrimaryVideoContainer();
-  if (!found) return false;
+  if (!found) {
+    const staleBar = document.getElementById('translate-king-universal-video-bar');
+    if (staleBar) staleBar.remove();
+    return false;
+  }
 
   const { container } = found;
   const computedPos = typeof window !== 'undefined' && window.getComputedStyle ? window.getComputedStyle(container).position : '';

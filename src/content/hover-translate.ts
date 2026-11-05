@@ -12,7 +12,10 @@ import { injectLoadingState, injectTranslation, removeTranslation } from './dom/
 
 let ctrlHoverEnabled = true;
 let lastHoveredElement: HTMLElement | null = null;
+let lastMouseX = -1;
+let lastMouseY = -1;
 let hoverListenersInitialized = false;
+let lastCtrlMovedBlock: HTMLElement | null = null;
 
 export function setCtrlHoverTranslateEnabled(enabled: boolean): void {
   ctrlHoverEnabled = enabled;
@@ -23,7 +26,7 @@ export function isCtrlHoverTranslateEnabled(): boolean {
 }
 
 /**
- * 查找鼠标所在位置的最佳可翻译段落容器
+ * 查找鼠标所在位置的最佳可翻译段落容器（支持 p/li/h1-h6 以及现代网页普遍使用的 div/span 文本块）
  */
 export function findHoverParagraphElement(target: HTMLElement | null): HTMLElement | null {
   if (!target || typeof target.closest !== 'function') return null;
@@ -35,13 +38,46 @@ export function findHoverParagraphElement(target: HTMLElement | null): HTMLEleme
     return null;
   }
 
-  return target.closest<HTMLElement>(
-    'p, li, blockquote, h1, h2, h3, h4, h5, h6, td, figcaption, dd, dt, [data-testid="tweetText"], .update-components-text, .feed-shared-inline-show-more-text, article > div'
+  // 1. 若鼠标正好指在已翻译出来的译文块 (.translate-king-wrapper) 上，向上找到宿主段落以便还原
+  const wrapper = target.closest<HTMLElement>('.translate-king-wrapper');
+  if (wrapper && wrapper.parentElement) {
+    return wrapper.parentElement;
+  }
+
+  // 2. 若鼠标指在已标记过 data-tk-translated 的段落内，直接返回该段落
+  const translatedHost = target.closest<HTMLElement>('[data-tk-translated], [data-tk-hover-translated]');
+  if (translatedHost) {
+    return translatedHost;
+  }
+
+  // 3. 优先匹配标准语义段落标签
+  const semantic = target.closest<HTMLElement>(
+    'p, li, blockquote, h1, h2, h3, h4, h5, h6, td, th, figcaption, dd, dt, summary, [data-testid="tweetText"], .update-components-text, .feed-shared-inline-show-more-text, .bili-rich-text-content, #content-text'
   );
+  if (semantic && (semantic.textContent || '').trim().length >= 2) {
+    return semantic;
+  }
+
+  // 4. 兜底匹配现代网页常见的 div / span / a / section 独立文本块（向上寻找文本长度适中的叶子容器）
+  let curr: HTMLElement | null = target;
+  for (let depth = 0; depth < 5 && curr && curr !== document.body && curr !== document.documentElement; depth++) {
+    const tag = curr.tagName;
+    if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT' || tag === 'BUTTON' || tag === 'INPUT' || tag === 'TEXTAREA') {
+      return null;
+    }
+    const text = (curr.textContent || '').replace(/\s+/g, ' ').trim();
+    const blockChildren = curr.querySelectorAll('p, div, li, article, section, table').length;
+    if (text.length >= 2 && text.length <= 1600 && blockChildren <= 2) {
+      return curr;
+    }
+    curr = curr.parentElement;
+  }
+
+  return null;
 }
 
 /**
- * 对单个段落执行即时双语展开或还原（指哪翻哪）
+ * 对单个段落执行即时双语展开或还原（指哪翻哪，支持中英双向自动互译）
  */
 export async function toggleSingleParagraphTranslation(
   el: HTMLElement,
@@ -54,6 +90,7 @@ export async function toggleSingleParagraphTranslation(
   if (
     el.hasAttribute('data-tk-translated') ||
     el.hasAttribute('data-tk-replaced') ||
+    el.hasAttribute('data-tk-hover-translated') ||
     el.querySelector('.translate-king-wrapper')
   ) {
     removeTranslation(el);
@@ -61,57 +98,64 @@ export async function toggleSingleParagraphTranslation(
     return false;
   }
 
-  // 提取该单段（或将其包装为临时容器提取）
-  let blocks = extractTranslatableBlocks(el, targetLang);
-  if (blocks.length === 0 && el.parentElement) {
-    const parentBlocks = extractTranslatableBlocks(el.parentElement, targetLang);
-    blocks = parentBlocks.filter((b) => b.element === el || el.contains(b.element));
+  // 提取纯净段落原文（剔除内部可能残存的译文容器）
+  const clone = el.cloneNode(true) as HTMLElement;
+  if (typeof clone.querySelectorAll === 'function') {
+    clone.querySelectorAll('.translate-king-wrapper, script, style').forEach((n) => n.remove());
   }
-  if (blocks.length === 0) {
-    const rawText = (el.textContent || '').trim();
-    if (rawText.length >= 2) {
-      blocks = [
-        {
-          id: `tk-hover-${Date.now()}`,
-          element: el,
-          originalText: rawText,
-          tagName: el.tagName
-        }
-      ];
-    }
-  }
-  if (blocks.length === 0) return false;
+  const rawText = (clone.textContent || '').replace(/\s+/g, ' ').trim();
+  if (rawText.length < 2) return false;
 
-  blocks.forEach((b) => injectLoadingState(b, mode));
+  // 智能双向互译：如果用户鼠标指着中文段落按 Ctrl，且目标语言是中文，则自动互译为英文 (en)，确保任何页面按 Ctrl 都有即时双语反馈！
+  const cjkCount = (rawText.match(/[\u4e00-\u9fa5]/g) || []).length;
+  const isMostlyChinese = cjkCount > rawText.length * 0.25;
+  const effectiveTargetLang: TargetLanguage =
+    isMostlyChinese && (targetLang === 'zh-CN' || targetLang === 'zh-TW') ? 'en' : targetLang;
+
+  const block = {
+    id: `tk-hover-${Date.now()}`,
+    element: el,
+    originalText: rawText,
+    tagName: el.tagName
+  };
+
+  // 加上柔和的蓝色脉冲边框提示用户已命中该段落
+  const prevOutline = el.style.outline;
+  const prevTransition = el.style.transition;
+  el.style.transition = 'outline 0.2s ease';
+  el.style.outline = '2px solid rgba(59, 130, 246, 0.65)';
+  setTimeout(() => {
+    el.style.outline = prevOutline;
+    el.style.transition = prevTransition;
+  }, 650);
+
+  injectLoadingState(block, mode);
 
   if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
     try {
-      const texts = blocks.map((b) => b.originalText);
       chrome.runtime.sendMessage(
         {
           type: 'TRANSLATE_BATCH',
-          texts,
-          toLang: targetLang
+          texts: [rawText],
+          toLang: effectiveTargetLang
         },
         (res: TranslateBatchResponse) => {
           if (chrome.runtime.lastError || !res || !Array.isArray(res.translations)) {
-            blocks.forEach((b) => removeTranslation(b.element));
+            removeTranslation(el);
             return;
           }
-          blocks.forEach((b, idx) => {
-            const trans = res.translations[idx];
-            if (trans && trans.trim() && trans.trim() !== b.originalText.trim()) {
-              injectTranslation(b, trans, mode);
-              b.element.setAttribute('data-tk-hover-translated', 'true');
-            } else {
-              removeTranslation(b.element);
-            }
-          });
+          const trans = res.translations[0];
+          if (trans && trans.trim() && trans.trim() !== rawText.trim()) {
+            injectTranslation(block, trans, mode);
+            el.setAttribute('data-tk-hover-translated', 'true');
+          } else {
+            removeTranslation(el);
+          }
         }
       );
       return true;
     } catch (_) {
-      blocks.forEach((b) => removeTranslation(b.element));
+      removeTranslation(el);
     }
   }
   return false;
@@ -119,39 +163,91 @@ export async function toggleSingleParagraphTranslation(
 
 /**
  * 初始化「按住 Ctrl 鼠标悬停单段即时翻译」监听器
+ * 同时支持两种直觉操作：
+ * 1. 鼠标停在任意段落上，单按一下 Ctrl 键 -> 翻译该段（再按一下 Ctrl 键 -> 还原原文）
+ * 2. 按住 Ctrl 键不放，移动鼠标划过某一段落 -> 自动翻译所指段落
  */
 export function initCtrlHoverParagraphTranslate(getTargetLang: () => TargetLanguage): void {
   if (typeof document === 'undefined' || hoverListenersInitialized) return;
   hoverListenersInitialized = true;
 
+  if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+    chrome.storage.local.get(['enableHoverTranslate'], (res) => {
+      if (typeof res?.enableHoverTranslate === 'boolean') {
+        ctrlHoverEnabled = res.enableHoverTranslate;
+      }
+    });
+    chrome.storage.onChanged?.addListener((changes, area) => {
+      if (area === 'local' && changes.enableHoverTranslate) {
+        ctrlHoverEnabled = changes.enableHoverTranslate.newValue !== false;
+      }
+    });
+  }
+
+  // 使用捕获阶段 (true) 监听鼠标位置，绝不被网页内部 stopPropagation 吞掉
   document.addEventListener(
     'mousemove',
-    (e) => {
+    (e: MouseEvent) => {
       lastHoveredElement = e.target as HTMLElement | null;
+      lastMouseX = e.clientX;
+      lastMouseY = e.clientY;
+
+      // 模式 2：按住 Ctrl 移动鼠标悬停到段落上直接触发
+      if (ctrlHoverEnabled && e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {
+        const para = findHoverParagraphElement(lastHoveredElement);
+        if (para && para !== lastCtrlMovedBlock) {
+          lastCtrlMovedBlock = para;
+          toggleSingleParagraphTranslation(para, getTargetLang(), 'bilingual');
+        }
+      } else if (!e.ctrlKey) {
+        lastCtrlMovedBlock = null;
+      }
     },
-    { passive: true }
+    true
   );
 
   let ctrlPressedAlone = false;
-  document.addEventListener('keydown', (e) => {
-    if (!ctrlHoverEnabled) return;
-    if (e.key === 'Control') {
-      ctrlPressedAlone = true;
-    } else {
-      ctrlPressedAlone = false;
-    }
-  });
-
-  document.addEventListener('keyup', (e) => {
-    if (!ctrlHoverEnabled) return;
-    if (e.key === 'Control' && ctrlPressedAlone) {
-      ctrlPressedAlone = false;
-      const para = findHoverParagraphElement(lastHoveredElement);
-      if (para) {
-        toggleSingleParagraphTranslation(para, getTargetLang(), 'bilingual');
+  document.addEventListener(
+    'keydown',
+    (e: KeyboardEvent) => {
+      if (!ctrlHoverEnabled) return;
+      if (e.key === 'Control' && !e.shiftKey && !e.altKey && !e.metaKey) {
+        ctrlPressedAlone = true;
+      } else {
+        ctrlPressedAlone = false;
       }
-    }
-  });
+    },
+    true
+  );
+
+  document.addEventListener(
+    'keyup',
+    (e: KeyboardEvent) => {
+      if (!ctrlHoverEnabled) return;
+      if (e.key === 'Control' && ctrlPressedAlone) {
+        ctrlPressedAlone = false;
+        // 如果刚才已经通过「按住 Ctrl 移动鼠标」触发过了当前块，松开 Ctrl 时不再重复冲抵还原
+        if (lastCtrlMovedBlock) {
+          lastCtrlMovedBlock = null;
+          return;
+        }
+        let targetEl = lastHoveredElement;
+        if (
+          (!targetEl || !targetEl.isConnected) &&
+          lastMouseX >= 0 &&
+          lastMouseY >= 0 &&
+          typeof document.elementFromPoint === 'function'
+        ) {
+          targetEl = document.elementFromPoint(lastMouseX, lastMouseY) as HTMLElement | null;
+        }
+        const para = findHoverParagraphElement(targetEl);
+        if (para) {
+          toggleSingleParagraphTranslation(para, getTargetLang(), 'bilingual');
+        }
+      }
+    },
+    true
+  );
 }
 
 /**
