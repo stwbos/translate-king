@@ -231,31 +231,62 @@ body.dark-mode .translate-king-wrapper .translate-king-text {
    YouTube 播放器控制栏与双语字幕样式强制规范 (防样式覆盖)
    ========================================================================== */
 
-/* 控制栏右下角双语切换按钮 (紧贴全屏按钮左侧) */
+/* 控制栏右下角翻译王设置按钮 (紧贴全屏按钮所在控制行最左侧，对齐原生按钮尺寸) */
 button.ytp-button.translate-king-yt-control-btn {
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
   vertical-align: top !important;
-  width: auto !important;
-  min-width: 76px !important;
+  width: 40px !important;
+  min-width: 40px !important;
   height: 100% !important;
-  padding: 0 4px !important;
+  padding: 0 !important;
   margin: 0 2px !important;
   line-height: normal !important;
   overflow: visible !important;
-  opacity: 1 !important;
+  opacity: 0.92 !important;
   visibility: visible !important;
   cursor: pointer !important;
   background: transparent !important;
   border: none !important;
   outline: none !important;
   box-sizing: border-box !important;
+  transition: opacity 0.15s ease, transform 0.15s ease !important;
   z-index: 100 !important;
 }
 
 button.ytp-button.translate-king-yt-control-btn:hover {
-  opacity: 0.9 !important;
+  opacity: 1 !important;
+  transform: scale(1.08) !important;
+}
+
+button.ytp-button.translate-king-yt-control-btn .translate-king-logo-wrap {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 22px !important;
+  height: 22px !important;
+  pointer-events: none !important;
+  position: relative !important;
+  transition: filter 0.2s ease !important;
+}
+
+button.ytp-button.translate-king-yt-control-btn .translate-king-logo-img {
+  width: 22px !important;
+  height: 22px !important;
+  border-radius: 5px !important;
+  object-fit: contain !important;
+  display: block !important;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35) !important;
+  pointer-events: none !important;
+}
+
+button.ytp-button.translate-king-yt-control-btn[data-tk-enabled="false"] .translate-king-logo-wrap {
+  filter: grayscale(1) opacity(0.45) !important;
+}
+
+button.ytp-button.translate-king-yt-control-btn[data-tk-enabled="true"] .translate-king-logo-wrap {
+  filter: drop-shadow(0 1px 3px rgba(37, 99, 235, 0.45)) !important;
 }
 
 /* YouTube 原位双语翻译行规范 */

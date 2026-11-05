@@ -12,6 +12,7 @@
  */
 
 import { TargetLanguage } from '../../types';
+import { createTranslateKingLogoElement } from '../logo';
 
 export interface YouTubeSubtitleStyleConfig {
   enabled: boolean;
@@ -547,18 +548,26 @@ export function toggleSubtitleSettingsMenu(callbacks: {
   });
 
   const openSummaryBtn = document.createElement('button');
-  openSummaryBtn.textContent = '✨ 视频总结/文稿';
   openSummaryBtn.style.cssText = `
     flex: 1 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 5px !important;
     padding: 7px 8px !important;
     border-radius: 8px !important;
-    border: 1px solid rgba(59, 130, 246, 0.45) !important;
-    background: rgba(37, 99, 235, 0.25) !important;
-    color: #93C5FD !important;
+    border: 1px solid rgba(59, 130, 246, 0.5) !important;
+    background: linear-gradient(135deg, rgba(30, 64, 175, 0.55), rgba(37, 99, 235, 0.45)) !important;
+    color: #DBEAFE !important;
     font-size: 11.5px !important;
     font-weight: 600 !important;
     cursor: pointer !important;
   `;
+  const menuSummaryLogo = createTranslateKingLogoElement(14, 'menu-summary');
+  const menuSummaryLabel = document.createElement('span');
+  menuSummaryLabel.textContent = '视频总结/文稿';
+  openSummaryBtn.appendChild(menuSummaryLogo);
+  openSummaryBtn.appendChild(menuSummaryLabel);
   openSummaryBtn.addEventListener('click', () => {
     menu.remove();
     callbacks.onOpenSummary();

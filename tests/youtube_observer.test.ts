@@ -160,18 +160,21 @@ describe('YouTube 原生字幕双语原位注入引擎 (NativeCaptionObserver)',
     const btn = document.getElementById('translate-king-yt-control-btn');
     expect(btn).not.toBeNull();
     expect(btn?.classList.contains('translate-king-yt-control-btn')).toBe(true);
-    expect(btn?.textContent).toContain('双语 ON');
+    expect(btn?.getAttribute('data-tk-enabled')).toBe('true');
+    expect(btn?.getAttribute('title')).toContain('设置');
+    expect(btn?.querySelector('.translate-king-logo-wrap')).not.toBeNull();
 
     // 必须位于控制行 (.ytp-right-controls) 的最左侧第一个位置
     expect(rightControls.firstElementChild).toBe(btn);
 
-    // 点击按钮切换为关闭状态
+    // 点击按钮一键直达字幕多维设置控制台
     btn?.click();
-    expect(btn?.textContent).toContain('双语 OFF');
+    const menu = document.getElementById('translate-king-yt-subtitle-menu');
+    expect(menu).not.toBeNull();
 
-    // 再次点击恢复为开启状态
+    // 再次点击按钮关闭设置菜单
     btn?.click();
-    expect(btn?.textContent).toContain('双语 ON');
+    expect(document.getElementById('translate-king-yt-subtitle-menu')).toBeNull();
 
     // 多次调用 ensurePlayerMounted 绝不产生重复按钮，且不销毁重建子节点
     const childBefore = btn?.firstChild;
@@ -201,10 +204,11 @@ describe('YouTube 原生字幕双语原位注入引擎 (NativeCaptionObserver)',
     const duplicateActionBtn = document.getElementById('translate-king-yt-action-btn');
     expect(duplicateActionBtn).toBeNull();
 
-    // 仅挂载 [✨ 视频总结] 按钮
+    // 仅挂载带翻译王 Logo 的 [视频总结] 按钮
     const summaryBtn = document.getElementById('translate-king-yt-summary-btn');
     expect(summaryBtn).not.toBeNull();
-    expect(summaryBtn?.textContent).toContain('✨ 视频总结');
+    expect(summaryBtn?.querySelector('.translate-king-logo-wrap')).not.toBeNull();
+    expect(summaryBtn?.textContent).toContain('视频总结');
   });
 
   it('3 小时超长视频 (10800 秒) 的总结与双语文字稿应当 100% 覆盖 00:00 至 3:00:00 结尾，绝不提前截断', () => {
@@ -271,10 +275,10 @@ describe('YouTube 原生字幕双语原位注入引擎 (NativeCaptionObserver)',
     observer.processActiveCaptions();
     await new Promise((r) => setTimeout(r, 50));
 
-    // 点击按钮内的齿轮触发器 [data-tk-role="settings-trigger"]
-    const gear = document.querySelector('[data-tk-role="settings-trigger"]') as HTMLElement;
-    expect(gear).not.toBeNull();
-    gear.click();
+    // 点击控制栏翻译王按钮弹出多维字幕设置菜单
+    const btn = document.getElementById('translate-king-yt-control-btn') as HTMLElement;
+    expect(btn).not.toBeNull();
+    btn.click();
 
     const menu = document.getElementById('translate-king-yt-subtitle-menu');
     expect(menu).not.toBeNull();
@@ -402,6 +406,9 @@ describe('YouTube 原生字幕双语原位注入引擎 (NativeCaptionObserver)',
       }
     });
 
+    const seg = captionWindow.querySelector('.ytp-caption-segment') as HTMLElement;
+    seg.textContent = 'Welcome everyone to the new video.';
+
     const observer = new NativeCaptionObserver('zh-CN');
     observer.start();
     observer.processActiveCaptions();
@@ -432,15 +439,15 @@ describe('YouTube 原生字幕双语原位注入引擎 (NativeCaptionObserver)',
     await new Promise((r) => setTimeout(r, 50));
     expect(captionWindow.querySelector('.translate-king-trans-text')?.textContent).toBe('你好世界');
 
-    // 模拟点击齿轮打开设置菜单
+    // 模拟点击翻译王按钮打开设置菜单
     const rightControls = document.createElement('div');
     rightControls.className = 'ytp-right-controls';
     player.appendChild(rightControls);
     ensurePlayerMounted();
 
-    const gear = document.querySelector('[data-tk-role="settings-trigger"]') as HTMLElement;
-    expect(gear).not.toBeNull();
-    gear.click();
+    const btn = document.getElementById('translate-king-yt-control-btn') as HTMLElement;
+    expect(btn).not.toBeNull();
+    btn.click();
 
     const menu = document.getElementById('translate-king-yt-subtitle-menu')!;
     expect(menu).not.toBeNull();

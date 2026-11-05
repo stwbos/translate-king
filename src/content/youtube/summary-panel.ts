@@ -19,6 +19,7 @@ import {
   parseSubtitlePayload,
   cleanRawText
 } from './extractor';
+import { createTranslateKingLogoElement } from '../logo';
 
 export interface SummarySection {
   startMs: number;
@@ -33,19 +34,90 @@ let cachedInterceptedCues: SubtitleCue[] = [];
 let cachedInterceptedVideoId: string | null = null;
 let cachedFetchedCues: SubtitleCue[] = [];
 let cachedVideoId: string | null = null;
+let liveObservedCues: SubtitleCue[] = [];
+let liveObservedVideoId: string | null = null;
 const latestBridgeTracks = new Map<string, YouTubeCaptionTrack[]>();
 
-function getLiveVideoIdFromUrl(): string | null {
+export function getLiveVideoIdFromUrl(): string | null {
   if (typeof window === 'undefined') return null;
   try {
     const params = new URLSearchParams(window.location.search);
     const v = params.get('v');
     if (v) return v;
-    const match = window.location.pathname.match(/\/(?:shorts|live|embed|v)\/([a-zA-Z0-9_-]+)/);
-    return match ? match[1] : null;
+
+    const ytMatch = window.location.pathname.match(/\/(?:shorts|live|embed|v)\/([a-zA-Z0-9_-]+)/);
+    if (ytMatch) return ytMatch[1];
+
+    const host = window.location.hostname || '';
+    if (host.includes('bilibili.com')) {
+      const bvidMatch = window.location.pathname.match(/\/video\/(BV[a-zA-Z0-9]+|av\d+)/i);
+      const p = params.get('p') || '1';
+      return bvidMatch ? `${bvidMatch[1]}_p${p}` : null;
+    }
+
+    if (host.includes('youtube.com') || host.includes('youtu.be')) {
+      return null;
+    }
+
+    // 针对通用视频平台（Coursera / Udemy / TED / Vimeo 等），仅在具有明确非根路径且非 YouTube 播放器环境时返回路径标识
+    if (window.location.pathname && window.location.pathname !== '/') {
+      return `${host}${window.location.pathname}${window.location.search}`;
+    }
+    return null;
   } catch {
     return null;
   }
+}
+
+/**
+ * 实时记录播放过程中由各平台字幕观察器捕获的字幕行（供无独立字幕轨接口的平台生成时间轴总结与导出 SRT）
+ */
+export function recordObservedVideoCue(
+  originalText: string,
+  translatedText?: string,
+  currentTimeSec?: number
+): void {
+  const cleaned = cleanRawText(originalText);
+  if (!cleaned) return;
+  const vid = getLiveVideoIdFromUrl();
+  if (vid && liveObservedVideoId && vid !== liveObservedVideoId) {
+    liveObservedCues = [];
+  }
+  liveObservedVideoId = vid;
+
+  if (liveObservedCues.length > 0 && liveObservedCues[liveObservedCues.length - 1].originalText === cleaned) {
+    if (translatedText && !liveObservedCues[liveObservedCues.length - 1].translatedText) {
+      liveObservedCues[liveObservedCues.length - 1].translatedText = translatedText;
+    }
+    return;
+  }
+
+  let startMs = 0;
+  if (typeof currentTimeSec === 'number' && !isNaN(currentTimeSec)) {
+    startMs = Math.max(0, Math.round(currentTimeSec * 1000));
+  } else if (typeof document !== 'undefined') {
+    const video = document.querySelector('video') as HTMLVideoElement | null;
+    if (video && typeof video.currentTime === 'number' && !isNaN(video.currentTime) && video.currentTime > 0) {
+      startMs = Math.max(0, Math.round(video.currentTime * 1000));
+    } else if (liveObservedCues.length > 0) {
+      startMs = liveObservedCues[liveObservedCues.length - 1].endMs;
+    }
+  }
+
+  if (liveObservedCues.length > 0) {
+    const prev = liveObservedCues[liveObservedCues.length - 1];
+    if (startMs > prev.startMs && startMs < prev.endMs) {
+      prev.endMs = startMs;
+    }
+  }
+
+  liveObservedCues.push({
+    id: liveObservedCues.length + 1,
+    startMs,
+    endMs: startMs + 4000,
+    originalText: cleaned,
+    translatedText
+  });
 }
 
 function extractVideoIdFromTimedTextUrl(rawUrl?: string): string | null {
@@ -53,6 +125,47 @@ function extractVideoIdFromTimedTextUrl(rawUrl?: string): string | null {
   const m = rawUrl.match(/[?&]v=([a-zA-Z0-9_-]+)/);
   return m ? m[1] : null;
 }
+
+/**
+ * 识别并拦截 B站未签名接口 (/x/player/v2) 返回的反爬蜜罐假字幕（固定为“我的名字是亚历克斯 我二十二岁 现在我必须独自抚养孩子”故事）
+ */
+export function isBiliHoneyPotRawText(text: string): boolean {
+  if (!text) return false;
+  return /亚历克斯|独自抚养孩子|我二十二岁.*抚养|大学教授有了外遇/.test(text);
+}
+
+export function isBiliHoneyPotCues(cues: SubtitleCue[]): boolean {
+  if (!cues || cues.length === 0) return false;
+  const sample = cues
+    .slice(0, 8)
+    .map((c) => c.originalText)
+    .join(' ');
+  return isBiliHoneyPotRawText(sample);
+}
+
+/**
+ * 判断文本是否已经以中文为主（用于在目标语言为 zh-CN/zh-TW 时避免将中文字幕二次重复机翻并展示两遍相同中文）
+ */
+function isPredominantlyChinese(text: string): boolean {
+  if (!text) return false;
+  const cjk = (text.match(/[\u4e00-\u9fa5]/g) || []).length;
+  if (cjk < 4) return false;
+  const foreignWords = (text.match(/[a-zA-Z]{2,}/g) || []).length;
+  return cjk >= foreignWords * 2;
+}
+
+function isNearDuplicateText(a: string, b: string): boolean {
+  const cleanA = a.replace(/[\s\p{P}]/gu, '').toLowerCase();
+  const cleanB = b.replace(/[\s\p{P}]/gu, '').toLowerCase();
+  if (!cleanA || !cleanB) return true;
+  if (cleanA === cleanB) return true;
+  if (isPredominantlyChinese(a) && isPredominantlyChinese(b)) {
+    return true;
+  }
+  return false;
+}
+
+const interceptedListeners = new Set<(cues: SubtitleCue[]) => void>();
 
 if (typeof window !== 'undefined') {
   window.addEventListener('message', (e) => {
@@ -67,6 +180,9 @@ if (typeof window !== 'undefined') {
     }
 
     if (e.data.type === 'TK_YT_INTERCEPTED_TIMEDTEXT' && typeof e.data.body === 'string') {
+      if (isBiliHoneyPotRawText(e.data.body)) {
+        return;
+      }
       const liveVid = getLiveVideoIdFromUrl();
       const payloadVid = e.data.videoId || extractVideoIdFromTimedTextUrl(e.data.url) || liveVid;
       // 严格拦截非当前视频的延迟返回字幕包，彻底消灭切视频串台 Bug
@@ -75,9 +191,10 @@ if (typeof window !== 'undefined') {
       }
       const isAsr = typeof e.data.url === 'string' && e.data.url.includes('kind=asr');
       const parsed = parseSubtitlePayload(e.data.body, isAsr);
-      if (parsed.length > 0) {
+      if (parsed.length > 0 && !isBiliHoneyPotCues(parsed)) {
         cachedInterceptedCues = parsed;
         cachedInterceptedVideoId = payloadVid;
+        interceptedListeners.forEach((cb) => cb(parsed));
       }
     }
   });
@@ -94,6 +211,9 @@ export function getSharedVideoCues(): SubtitleCue[] {
   if (cachedFetchedCues.length > 0 && (!liveVid || !cachedVideoId || cachedVideoId === liveVid)) {
     return cachedFetchedCues;
   }
+  if (liveObservedCues.length > 0 && (!liveVid || !liveObservedVideoId || liveObservedVideoId === liveVid)) {
+    return liveObservedCues;
+  }
   return [];
 }
 
@@ -107,6 +227,9 @@ export function clearSharedCueTranslations(): void {
   for (const c of cachedFetchedCues) {
     delete c.translatedText;
   }
+  for (const c of liveObservedCues) {
+    delete c.translatedText;
+  }
 }
 
 /**
@@ -117,6 +240,8 @@ export function clearAllSharedVideoCues(): void {
   cachedInterceptedVideoId = null;
   cachedFetchedCues = [];
   cachedVideoId = null;
+  liveObservedCues = [];
+  liveObservedVideoId = null;
 }
 
 export async function preloadSharedVideoCues(videoId: string | null): Promise<SubtitleCue[]> {
@@ -189,6 +314,17 @@ export function parseTimestampToMs(str: string): number {
  */
 export function groupCuesIntoSections(cues: SubtitleCue[], targetSectionCount = 24): SummarySection[] {
   if (!cues || cues.length === 0) return [];
+
+  // 若输入已经是预划分好的结构化时间轴章节 (如 B站简介知识点大纲、YouTube 章节看点，段数 <= targetSectionCount 且每段跨度 >= 10s)，直接保留 1:1 章节
+  if (cues.length <= targetSectionCount && cues.every((c) => c.endMs - c.startMs >= 10000)) {
+    return cues.map((c) => ({
+      startMs: c.startMs,
+      endMs: c.endMs,
+      timestampStr: formatTimestamp(c.startMs),
+      originalSummary: c.originalText,
+      translatedSummary: c.translatedText || ''
+    }));
+  }
 
   const firstStartMs = cues[0].startMs;
   const lastEndMs = Math.max(cues[cues.length - 1].endMs, cues[cues.length - 1].startMs + 5000);
@@ -287,6 +423,46 @@ export function mergeCuesIntoTranscriptParagraphs(cues: SubtitleCue[], paragraph
   return merged;
 }
 
+/**
+ * 从文本描述或章节列表中解析带时间戳 (如 00:00 章节名、05:38 知识点) 的章节为 SubtitleCue 列表
+ */
+export function parseTimestampChaptersFromText(text: string, totalDurationMs = 600000): SubtitleCue[] {
+  if (!text) return [];
+  const lines = text.split(/\r?\n/);
+  const rawChapters: Array<{ startMs: number; text: string }> = [];
+  const seenStarts = new Set<number>();
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const m = trimmed.match(/^(?:[-*•]\s*)?(\d{1,2}:\d{2}(?::\d{2})?)\s+(.+)$/);
+    if (m) {
+      const startMs = parseTimestampToMs(m[1]);
+      const content = m[2].trim();
+      if (content && !seenStarts.has(startMs)) {
+        seenStarts.add(startMs);
+        rawChapters.push({ startMs, text: content });
+      }
+    }
+  }
+
+  if (rawChapters.length === 0) return [];
+  rawChapters.sort((a, b) => a.startMs - b.startMs);
+
+  return rawChapters.map((ch, idx) => {
+    const nextStart =
+      idx + 1 < rawChapters.length
+        ? rawChapters[idx + 1].startMs
+        : Math.max(ch.startMs + 60000, totalDurationMs);
+    return {
+      id: idx + 1,
+      startMs: ch.startMs,
+      endMs: Math.max(ch.startMs + 5000, nextStart),
+      originalText: ch.text
+    };
+  });
+}
+
 export class YouTubeSummaryPanel {
   private panelEl: HTMLElement | null = null;
   private bodyEl: HTMLElement | null = null;
@@ -301,6 +477,20 @@ export class YouTubeSummaryPanel {
 
   constructor(targetLang: TargetLanguage = 'zh-CN') {
     this.targetLang = targetLang;
+    interceptedListeners.add((newCues) => {
+      if (
+        this.panelEl &&
+        document.body.contains(this.panelEl) &&
+        this.panelEl.style.display !== 'none' &&
+        !this.isLoading &&
+        newCues.length > this.rawCues.length
+      ) {
+        this.rawCues = [];
+        this.sections = [];
+        this.transcriptParagraphs = [];
+        this.loadAndSummarize();
+      }
+    });
   }
 
   public setTargetLang(lang: TargetLanguage): void {
@@ -369,30 +559,55 @@ export class YouTubeSummaryPanel {
     const panel = document.createElement('div');
     panel.id = 'translate-king-yt-summary-panel';
     panel.setAttribute('translate', 'no');
+    panel.setAttribute('data-tk-ignore', 'true');
     panel.style.cssText = `
+      position: relative !important;
       display: flex !important;
       flex-direction: column !important;
       width: 100% !important;
       max-height: 560px !important;
       margin: 0 0 16px 0 !important;
-      background: #0f172a !important;
+      background: linear-gradient(180deg, #0f1d3a 0%, #091122 100%) !important;
       color: #f8fafc !important;
-      border: 1px solid rgba(245, 158, 11, 0.35) !important;
+      border: 1px solid rgba(59, 130, 246, 0.45) !important;
       border-radius: 14px !important;
-      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45) !important;
+      box-shadow: 0 12px 32px rgba(2, 6, 23, 0.65), 0 0 0 1px rgba(59, 130, 246, 0.15) !important;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif !important;
       overflow: hidden !important;
       box-sizing: border-box !important;
-      z-index: 200 !important;
+      z-index: 2147483640 !important;
+      pointer-events: auto !important;
     `;
+
+    // 阻止宿主页面（如 B站右栏或通用播放器外层）吞噬点击与滚轮事件，保证总结面板 100% 可交互
+    panel.addEventListener('click', (e) => e.stopPropagation());
+    panel.addEventListener('mousedown', (e) => e.stopPropagation());
+    panel.addEventListener('mouseup', (e) => e.stopPropagation());
+    panel.addEventListener('dblclick', (e) => e.stopPropagation());
+    panel.addEventListener('wheel', (e) => e.stopPropagation(), { passive: true });
+
+    const isBili = typeof window !== 'undefined' && (window.location.hostname || '').includes('bilibili.com');
+    const biliDanmakuBox = isBili
+      ? (document.querySelector('#danmukuBox') || document.querySelector('.danmaku-box'))
+      : null;
+    const biliUpPanel = isBili
+      ? (document.querySelector('.up-panel-container') || document.querySelector('.right-container-inner > .up-info-container'))
+      : null;
 
     const secondaryInner =
       document.querySelector('#secondary #secondary-inner') ||
       document.querySelector('ytd-watch-flexy #secondary') ||
+      document.querySelector('.right-container-inner') ||
+      document.querySelector('.right-container') ||
       document.querySelector('#below') ||
       document.querySelector('#primary-inner');
 
-    if (secondaryInner && secondaryInner.firstChild) {
+    if (biliDanmakuBox && biliDanmakuBox.parentElement) {
+      // 在 B站挂载于弹幕列表正上方（UP主信息卡片下方），与视频播放器顶边平齐，彻底避开顶部固定导航栏遮挡
+      biliDanmakuBox.parentElement.insertBefore(panel, biliDanmakuBox);
+    } else if (biliUpPanel && biliUpPanel.parentElement) {
+      biliUpPanel.parentElement.insertBefore(panel, biliUpPanel.nextSibling);
+    } else if (secondaryInner && secondaryInner.firstChild) {
       secondaryInner.insertBefore(panel, secondaryInner.firstChild);
     } else if (secondaryInner) {
       secondaryInner.appendChild(panel);
@@ -401,6 +616,7 @@ export class YouTubeSummaryPanel {
       panel.style.right = '20px';
       panel.style.top = '72px';
       panel.style.width = '400px';
+      panel.style.zIndex = '2147483645';
       document.body.appendChild(panel);
     }
 
@@ -415,10 +631,22 @@ export class YouTubeSummaryPanel {
   }
 
   private seekToMs(ms: number): void {
-    const video = document.querySelector('#movie_player video, video.html5-main-video') as HTMLVideoElement | null;
+    const sec = Math.max(0, ms / 1000);
+    if (typeof window !== 'undefined') {
+      try {
+        window.postMessage({ type: 'TK_SEEK_TO_SECONDS', seconds: sec }, '*');
+      } catch (_) {}
+    }
+    const video = document.querySelector(
+      '#movie_player video, video.html5-main-video, .bpx-player-video-wrap video, .bpx-player-video-wrap bwp-video, .bilibili-player-video video, video, bwp-video'
+    ) as HTMLVideoElement | null;
     if (video) {
-      video.currentTime = Math.max(0, ms / 1000);
-      video.play().catch(() => {});
+      try {
+        video.currentTime = sec;
+        if (typeof video.play === 'function') {
+          video.play().catch(() => {});
+        }
+      } catch (_) {}
     }
   }
 
@@ -441,8 +669,356 @@ export class YouTubeSummaryPanel {
     } catch (_) {}
   }
 
+  private parseTimestampChaptersFromText(text: string, totalDurationMs = 600000): SubtitleCue[] {
+    return parseTimestampChaptersFromText(text, totalDurationMs);
+  }
+
+  /**
+   * 从浏览器 Performance Resource Timing 中直接查找 B站播放器已加载的真实 AI/CC 字幕 URL 或带合法 WBI 签名的 player/wbi/v2 接口
+   */
+  private async tryRecoverBiliSubtitleFromPerformance(targetVid: string | null): Promise<SubtitleCue[]> {
+    if (typeof performance === 'undefined' || typeof performance.getEntriesByType !== 'function' || typeof fetch !== 'function') {
+      return [];
+    }
+    try {
+      const entries = performance.getEntriesByType('resource') as PerformanceResourceTiming[];
+      // 1. 直接匹配 B站播放器已请求的 aisubtitle.hdslb.com / bfs/subtitle JSON URL
+      for (let i = entries.length - 1; i >= 0; i--) {
+        const entryUrl = entries[i]?.name || '';
+        if (
+          entryUrl.includes('aisubtitle.hdslb.com') ||
+          entryUrl.includes('/bfs/subtitle/') ||
+          entryUrl.includes('/bfs/ai_subtitle/')
+        ) {
+          try {
+            const subRes = await fetch(entryUrl);
+            if (subRes.ok) {
+              const subText = await subRes.text();
+              if (!isBiliHoneyPotRawText(subText)) {
+                const parsed = parseSubtitlePayload(subText, false);
+                if (parsed.length > 0 && !isBiliHoneyPotCues(parsed)) {
+                  cachedFetchedCues = parsed;
+                  cachedVideoId = targetVid;
+                  return parsed;
+                }
+              }
+            }
+          } catch (_) {}
+        }
+      }
+
+      // 2. 匹配 B站前端自身已带 w_rid 签名的 /x/player/wbi/v2 请求
+      for (let i = entries.length - 1; i >= 0; i--) {
+        const entryUrl = entries[i]?.name || '';
+        if (entryUrl.includes('/x/player/wbi/v2') && entryUrl.includes('w_rid=')) {
+          try {
+            const wbiRes = await fetch(entryUrl, { credentials: 'include' });
+            if (wbiRes.ok) {
+              const wbiJson = await wbiRes.json();
+              const subs = wbiJson?.data?.subtitle?.subtitles;
+              if (Array.isArray(subs) && subs.length > 0) {
+                for (const sub of subs) {
+                  if (!sub?.subtitle_url) continue;
+                  const subUrl = sub.subtitle_url.startsWith('//')
+                    ? `https:${sub.subtitle_url}`
+                    : sub.subtitle_url.replace(/^http:\/\//i, 'https://');
+                  try {
+                    const subRes = await fetch(subUrl);
+                    if (subRes.ok) {
+                      const subText = await subRes.text();
+                      if (!isBiliHoneyPotRawText(subText)) {
+                        const parsed = parseSubtitlePayload(subText, false);
+                        if (parsed.length > 0 && !isBiliHoneyPotCues(parsed)) {
+                          cachedFetchedCues = parsed;
+                          cachedVideoId = targetVid;
+                          return parsed;
+                        }
+                      }
+                    }
+                  } catch (_) {}
+                }
+              }
+            }
+          } catch (_) {}
+        }
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  /**
+   * 哔哩哔哩 (Bilibili) 专属多通道字幕与时间轴章节提取引擎：
+   * 1. 优先读取 yt-bridge 或 Performance Resource Timing 中 B站播放器自身携带合法签名加载的 aisubtitle / wbi 字幕轨（彻底杜绝未签名 /x/player/v2 的反爬假字幕蜜罐！）
+   * 2. B站官方 view 接口公開 CC 字幕与高能看点分段 (view_points)
+   * 3. UP主视频简介 (desc) 中的时间轴知识点大纲 (如 00:00 🔨简单雕刻入门...)
+   * 4. 实时播放已捕获字幕 (liveObservedCues) 与视频简介段落保底
+   */
+  private async extractBilibiliVideoCues(): Promise<SubtitleCue[]> {
+    const targetVid = getLiveVideoIdFromUrl() || this.currentVideoId;
+    if (
+      cachedInterceptedCues.length > 0 &&
+      (!targetVid || !cachedInterceptedVideoId || cachedInterceptedVideoId === targetVid) &&
+      !isBiliHoneyPotCues(cachedInterceptedCues)
+    ) {
+      return cachedInterceptedCues;
+    }
+    if (
+      cachedFetchedCues.length > 0 &&
+      (!targetVid || cachedVideoId === targetVid) &&
+      !isBiliHoneyPotCues(cachedFetchedCues)
+    ) {
+      return cachedFetchedCues;
+    }
+
+    // 主动唤醒 yt-bridge 并尝试从 Performance 记录中恢复 B站播放器已加载的真实 AI/CC 字幕
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (typeof window !== 'undefined') {
+        try {
+          window.postMessage({ type: 'TK_REQUEST_YT_TRACKS' }, '*');
+        } catch (_) {}
+      }
+      const perfCues = await this.tryRecoverBiliSubtitleFromPerformance(targetVid);
+      if (perfCues.length > 0) {
+        return perfCues;
+      }
+      if (
+        cachedInterceptedCues.length > 0 &&
+        (!targetVid || !cachedInterceptedVideoId || cachedInterceptedVideoId === targetVid) &&
+        !isBiliHoneyPotCues(cachedInterceptedCues)
+      ) {
+        return cachedInterceptedCues;
+      }
+      if (attempt < 2) {
+        await new Promise((r) => setTimeout(r, 180));
+      }
+    }
+
+    let apiTitle = '';
+    let apiDesc = '';
+    let durationMs = 300000;
+    const videoEl = document.querySelector('video') as HTMLVideoElement | null;
+    if (videoEl && videoEl.duration && !isNaN(videoEl.duration) && isFinite(videoEl.duration)) {
+      durationMs = Math.round(videoEl.duration * 1000);
+    }
+
+    const bvidMatch =
+      typeof window !== 'undefined' ? window.location.pathname.match(/\/video\/(BV[a-zA-Z0-9]+)/i) : null;
+    const bvid = bvidMatch ? bvidMatch[1] : null;
+    const pageNum =
+      typeof window !== 'undefined'
+        ? Math.max(1, parseInt(new URLSearchParams(window.location.search).get('p') || '1', 10) || 1)
+        : 1;
+
+    if (bvid && typeof fetch === 'function') {
+      try {
+        const viewRes = await fetch(`https://api.bilibili.com/x/web-interface/view?bvid=${bvid}`, {
+          credentials: 'include'
+        });
+        if (viewRes.ok) {
+          const viewJson = await viewRes.json();
+          const vData = viewJson?.data;
+          if (vData) {
+            apiTitle = vData.title || '';
+            apiDesc = vData.desc || '';
+            const pages = Array.isArray(vData.pages) ? vData.pages : [];
+            const activePage = pages[pageNum - 1] || pages[0];
+            if (activePage?.duration || vData.duration) {
+              durationMs = Math.round((activePage?.duration || vData.duration) * 1000);
+            }
+
+            const candidateSubtitles: Array<{ subtitle_url?: string }> = [];
+            if (Array.isArray(vData.subtitle?.list)) {
+              candidateSubtitles.push(...vData.subtitle.list);
+            }
+
+            for (const sub of candidateSubtitles) {
+              if (!sub?.subtitle_url) continue;
+              const subUrl = sub.subtitle_url.startsWith('//')
+                ? `https:${sub.subtitle_url}`
+                : sub.subtitle_url.replace(/^http:\/\//i, 'https://');
+              try {
+                const subRes = await fetch(subUrl);
+                if (subRes.ok) {
+                  const subText = await subRes.text();
+                  if (!isBiliHoneyPotRawText(subText)) {
+                    const parsed = parseSubtitlePayload(subText, false);
+                    if (parsed.length > 0 && !isBiliHoneyPotCues(parsed)) {
+                      cachedFetchedCues = parsed;
+                      cachedVideoId = targetVid;
+                      return parsed;
+                    }
+                  }
+                }
+              } catch (_) {}
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
+    // 通道 B2：解析 UP主视频简介 (API desc 或 DOM 简介节点) 中的时间轴知识点章节
+    const domDescEl = document.querySelector(
+      '.desc-info-text, .basic-desc-info, #v_desc, .video-desc-container'
+    );
+    const combinedDesc = apiDesc || domDescEl?.textContent || '';
+    const descChapters = this.parseTimestampChaptersFromText(combinedDesc, durationMs);
+    if (descChapters.length > 0) {
+      cachedFetchedCues = descChapters;
+      cachedVideoId = targetVid;
+      return descChapters;
+    }
+
+    // 通道 B3：检查播放过程中实时捕获的字幕流
+    if (liveObservedCues.length > 0 && (!targetVid || !liveObservedVideoId || liveObservedVideoId === targetVid)) {
+      return liveObservedCues;
+    }
+
+    // 通道 B4：基于视频标题与简介段落生成结构化概览
+    const domTitleEl = document.querySelector('h1.video-title, .video-info-title, h1');
+    const finalTitle = (apiTitle || domTitleEl?.textContent || document.title || '')
+      .replace(/_哔哩哔哩_bilibili$/i, '')
+      .trim();
+    const fallbackCues: SubtitleCue[] = [];
+    const descParagraphs = combinedDesc
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter((l) => l.length > 6 && !/^https?:\/\//i.test(l));
+
+    if (finalTitle) {
+      fallbackCues.push({
+        id: 1,
+        startMs: 0,
+        endMs: Math.min(60000, durationMs),
+        originalText: finalTitle
+      });
+    }
+
+    if (descParagraphs.length > 0) {
+      const stepMs = Math.max(15000, Math.floor(durationMs / Math.max(1, descParagraphs.length)));
+      descParagraphs.forEach((para, idx) => {
+        const sMs = Math.min(durationMs - 5000, idx * stepMs);
+        fallbackCues.push({
+          id: fallbackCues.length + 1,
+          startMs: Math.max(0, sMs),
+          endMs: Math.min(durationMs, sMs + stepMs),
+          originalText: para
+        });
+      });
+    }
+
+    return fallbackCues;
+  }
+
+  /**
+   * 全网通用视频平台 (Coursera / TED / Udemy / Vimeo / 原生 HTML5 Video 等) 字幕与章节提取引擎：
+   * 1. 原生 HTML5 <video> textTracks 内存轨道 (VTTCue)
+   * 2. <track src="*.vtt|*.srt"> 字幕文件拉取解析
+   * 3. 实时观察器已捕获字幕 (liveObservedCues)
+   * 4. 页面内时间轴章节与视频描述提取
+   */
+  private async extractUniversalVideoCues(): Promise<SubtitleCue[]> {
+    const targetVid = getLiveVideoIdFromUrl() || this.currentVideoId;
+    if (cachedFetchedCues.length > 0 && (!targetVid || cachedVideoId === targetVid)) {
+      return cachedFetchedCues;
+    }
+
+    // 1. 检查所有 HTML5 <video> 的 textTracks 与 <track> 标签
+    const videos = Array.from(document.querySelectorAll('video'));
+    for (const video of videos) {
+      if (video.textTracks && video.textTracks.length > 0) {
+        for (let i = 0; i < video.textTracks.length; i++) {
+          const track = video.textTracks[i];
+          if (track.mode === 'disabled') {
+            try {
+              track.mode = 'hidden';
+            } catch (_) {}
+          }
+          if (track.cues && track.cues.length > 0) {
+            const cues: SubtitleCue[] = [];
+            for (let j = 0; j < track.cues.length; j++) {
+              const cue = track.cues[j] as any;
+              const text = cleanRawText(String(cue.text || ''));
+              if (text) {
+                const startMs = Math.round(Number(cue.startTime || 0) * 1000);
+                const endMs = Math.max(startMs + 500, Math.round(Number(cue.endTime || (cue.startTime || 0) + 3) * 1000));
+                cues.push({ id: cues.length + 1, startMs, endMs, originalText: text });
+              }
+            }
+            if (cues.length > 0) {
+              cachedFetchedCues = cues;
+              cachedVideoId = targetVid;
+              return cues;
+            }
+          }
+        }
+      }
+
+      const trackEls = Array.from(video.querySelectorAll('track'));
+      for (const trackEl of trackEls) {
+        const src = trackEl.getAttribute('src') || trackEl.src;
+        if (src && typeof fetch === 'function') {
+          try {
+            const res = await fetch(src);
+            if (res.ok) {
+              const raw = await res.text();
+              const parsed = parseSubtitlePayload(raw, false);
+              if (parsed.length > 0) {
+                cachedFetchedCues = parsed;
+                cachedVideoId = targetVid;
+                return parsed;
+              }
+            }
+          } catch (_) {}
+        }
+      }
+    }
+
+    // 2. 检查实时捕获的字幕流
+    if (liveObservedCues.length > 0) {
+      return liveObservedCues;
+    }
+
+    // 3. 提取页面内转录文本段或带时间戳章节
+    const durationMs =
+      videos[0]?.duration && !isNaN(videos[0].duration) && isFinite(videos[0].duration)
+        ? Math.round(videos[0].duration * 1000)
+        : 300000;
+    const bodyText = document.body?.innerText || document.body?.textContent || '';
+    const chapters = this.parseTimestampChaptersFromText(bodyText, durationMs);
+    if (chapters.length > 0) {
+      return chapters;
+    }
+
+    const titleText = (document.querySelector('h1')?.textContent || document.title || '').trim();
+    const metaDesc =
+      (document.querySelector('meta[name="description"], meta[property="og:description"]') as HTMLMetaElement | null)
+        ?.content || '';
+    if (titleText) {
+      return [
+        {
+          id: 1,
+          startMs: 0,
+          endMs: Math.min(60000, durationMs),
+          originalText: metaDesc ? `${titleText} — ${metaDesc.slice(0, 200)}` : titleText
+        }
+      ];
+    }
+
+    return [];
+  }
+
   private async extractVideoCues(): Promise<SubtitleCue[]> {
     this.closeNativeEngagementPanels();
+    const host = typeof window !== 'undefined' ? window.location.hostname || '' : '';
+
+    if (host.includes('bilibili.com')) {
+      return this.extractBilibiliVideoCues();
+    }
+
+    if (!host.includes('youtube.com') && !host.includes('youtu.be')) {
+      return this.extractUniversalVideoCues();
+    }
+
     const targetVid = getLiveVideoIdFromUrl() || this.currentVideoId;
 
     // 主动向 yt-bridge 索取当前视频真实 timedtext 字幕流与最新 captionTracks (最多重试 3 次等待新视频播放器初始化)
@@ -540,7 +1116,11 @@ export class YouTubeSummaryPanel {
       }
     });
 
-    return fallbackCues;
+    if (fallbackCues.length > 0) {
+      return fallbackCues;
+    }
+
+    return this.extractUniversalVideoCues();
   }
 
   private translateBatchTexts(texts: string[]): Promise<string[]> {
@@ -599,12 +1179,23 @@ export class YouTubeSummaryPanel {
       this.transcriptParagraphs = mergeCuesIntoTranscriptParagraphs(extracted, 18000);
 
       if (this.sections.length > 0) {
-        const sourceTexts = this.sections.map((s) => s.originalSummary);
-        const translated = await this.translateBatchTexts(sourceTexts);
-        if (epoch !== this.translationEpoch) return;
-        this.sections.forEach((sec, idx) => {
-          sec.translatedSummary = translated[idx] || sec.originalSummary;
-        });
+        const isChineseTarget = this.targetLang === 'zh-CN' || this.targetLang === 'zh-TW';
+        const allAlreadyChinese =
+          isChineseTarget &&
+          this.sections.every((s) => isPredominantlyChinese(s.originalSummary));
+
+        if (allAlreadyChinese) {
+          this.sections.forEach((sec) => {
+            sec.translatedSummary = sec.originalSummary;
+          });
+        } else {
+          const sourceTexts = this.sections.map((s) => s.originalSummary);
+          const translated = await this.translateBatchTexts(sourceTexts);
+          if (epoch !== this.translationEpoch) return;
+          this.sections.forEach((sec, idx) => {
+            sec.translatedSummary = translated[idx] || sec.originalSummary;
+          });
+        }
       }
     } catch (err) {
       console.warn('[TranslateKing Summary] 提取视频总结异常:', err);
@@ -622,10 +1213,13 @@ export class YouTubeSummaryPanel {
    * 渐进式后台批量翻译全部文字稿段落（从 00:00 到视频结尾，每批 25 段），并实时无感更新 DOM 节点
    */
   private async translateAllTranscriptParagraphsProgressively(epoch: number): Promise<void> {
+    const isChineseTarget = this.targetLang === 'zh-CN' || this.targetLang === 'zh-TW';
     const BATCH_SIZE = 25;
     for (let i = 0; i < this.transcriptParagraphs.length; i += BATCH_SIZE) {
       if (epoch !== this.translationEpoch) return;
-      const chunk = this.transcriptParagraphs.slice(i, i + BATCH_SIZE).filter((c) => !c.translatedText);
+      const chunk = this.transcriptParagraphs
+        .slice(i, i + BATCH_SIZE)
+        .filter((c) => !c.translatedText && !(isChineseTarget && isPredominantlyChinese(c.originalText)));
       if (chunk.length === 0) continue;
 
       const texts = chunk.map((c) => c.originalText);
@@ -690,55 +1284,89 @@ export class YouTubeSummaryPanel {
     if (!this.panelEl) return;
     this.clearElement(this.panelEl);
 
-    // 1. 顶部标题栏
+    // 1. 顶部标题栏（翻译王宝石蓝主题色 + 品牌 Logo）
     const header = document.createElement('div');
     header.style.cssText = `
       display: flex !important;
       align-items: center !important;
       justify-content: space-between !important;
       padding: 12px 14px !important;
-      background: linear-gradient(90deg, rgba(245, 158, 11, 0.18), rgba(15, 23, 42, 0.95)) !important;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+      background: linear-gradient(135deg, rgba(30, 64, 175, 0.52) 0%, rgba(37, 99, 235, 0.28) 55%, rgba(15, 23, 42, 0.95) 100%) !important;
+      border-bottom: 1px solid rgba(59, 130, 246, 0.28) !important;
     `;
 
     const titleWrap = document.createElement('div');
-    titleWrap.style.cssText = 'display: flex !important; align-items: center !important; gap: 6px !important; font-weight: 700 !important; font-size: 14px !important; color: #FDE047 !important;';
+    titleWrap.style.cssText = 'display: flex !important; align-items: center !important; gap: 7px !important; font-weight: 700 !important; font-size: 14px !important; color: #EFF6FF !important;';
     const totalSpanStr =
       this.rawCues.length > 0
         ? ` (00:00 ~ ${formatTimestamp(this.rawCues[this.rawCues.length - 1].endMs)})`
         : '';
-    titleWrap.textContent = `✨ 视频时间轴总结${totalSpanStr}`;
+    const headerLogo = createTranslateKingLogoElement(18, 'summary-header');
+    const headerText = document.createElement('span');
+    headerText.style.cssText = 'color: #EFF6FF !important;';
+    headerText.textContent = `视频时间轴总结${totalSpanStr}`;
+    titleWrap.appendChild(headerLogo);
+    titleWrap.appendChild(headerText);
 
     const headerActions = document.createElement('div');
     headerActions.style.cssText = 'display: flex !important; align-items: center !important; gap: 6px !important;';
 
+    const refreshBtn = document.createElement('button');
+    refreshBtn.type = 'button';
+    refreshBtn.style.cssText = `
+      background: rgba(37, 99, 235, 0.24) !important;
+      color: #DBEAFE !important;
+      border: 1px solid rgba(59, 130, 246, 0.42) !important;
+      border-radius: 6px !important;
+      padding: 4px 8px !important;
+      font-size: 12px !important;
+      cursor: pointer !important;
+    `;
+    refreshBtn.textContent = '🔄 刷新';
+    refreshBtn.title = '重新提取视频字幕并刷新总结';
+    refreshBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      cachedFetchedCues = [];
+      this.rawCues = [];
+      this.sections = [];
+      this.transcriptParagraphs = [];
+      this.loadAndSummarize();
+    });
+
     const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
     copyBtn.style.cssText = `
-      background: rgba(255, 255, 255, 0.1) !important;
-      color: #f8fafc !important;
-      border: 1px solid rgba(255, 255, 255, 0.15) !important;
+      background: rgba(37, 99, 235, 0.24) !important;
+      color: #DBEAFE !important;
+      border: 1px solid rgba(59, 130, 246, 0.42) !important;
       border-radius: 6px !important;
       padding: 4px 8px !important;
       font-size: 12px !important;
       cursor: pointer !important;
     `;
     copyBtn.textContent = '📋 复制全文';
-    copyBtn.addEventListener('click', () => this.copyFullTranscript(copyBtn));
+    copyBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.copyFullTranscript(copyBtn);
+    });
 
     const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
     closeBtn.style.cssText = `
       background: transparent !important;
-      color: #94a3b8 !important;
+      color: #93C5FD !important;
       border: none !important;
       font-size: 15px !important;
       cursor: pointer !important;
       padding: 2px 6px !important;
     `;
     closeBtn.textContent = '✕';
-    closeBtn.addEventListener('click', () => {
+    closeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
       if (this.panelEl) this.panelEl.style.display = 'none';
     });
 
+    headerActions.appendChild(refreshBtn);
     headerActions.appendChild(copyBtn);
     headerActions.appendChild(closeBtn);
     header.appendChild(titleWrap);
@@ -749,8 +1377,8 @@ export class YouTubeSummaryPanel {
     const tabBar = document.createElement('div');
     tabBar.style.cssText = `
       display: flex !important;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
-      background: rgba(15, 23, 42, 0.7) !important;
+      border-bottom: 1px solid rgba(59, 130, 246, 0.2) !important;
+      background: rgba(15, 23, 42, 0.78) !important;
     `;
 
     const createTabBtn = (key: 'summary' | 'transcript', label: string) => {
@@ -761,10 +1389,10 @@ export class YouTubeSummaryPanel {
         padding: 9px 10px !important;
         font-size: 13px !important;
         font-weight: ${isActive ? '700' : '500'} !important;
-        color: ${isActive ? '#FDE047' : '#94a3b8'} !important;
-        background: ${isActive ? 'rgba(245, 158, 11, 0.1)' : 'transparent'} !important;
+        color: ${isActive ? '#60A5FA' : '#94a3b8'} !important;
+        background: ${isActive ? 'rgba(37, 99, 235, 0.18)' : 'transparent'} !important;
         border: none !important;
-        border-bottom: 2px solid ${isActive ? '#F59E0B' : 'transparent'} !important;
+        border-bottom: 2px solid ${isActive ? '#3B82F6' : 'transparent'} !important;
         cursor: pointer !important;
       `;
       btn.textContent = label;
@@ -795,7 +1423,7 @@ export class YouTubeSummaryPanel {
 
     if (this.isLoading) {
       const loadingEl = document.createElement('div');
-      loadingEl.style.cssText = 'padding: 24px 12px !important; text-align: center !important; color: #FDE047 !important;';
+      loadingEl.style.cssText = 'padding: 24px 12px !important; text-align: center !important; color: #93C5FD !important;';
       loadingEl.textContent = '⏳ 正在提取全视频时间轴字幕并生成全程中文总结...';
       body.appendChild(loadingEl);
     } else if (this.activeTab === 'summary') {
@@ -809,8 +1437,8 @@ export class YouTubeSummaryPanel {
           const card = document.createElement('div');
           card.style.cssText = `
             padding: 10px 12px !important;
-            background: rgba(30, 41, 59, 0.75) !important;
-            border: 1px solid rgba(255, 255, 255, 0.06) !important;
+            background: linear-gradient(135deg, rgba(30, 58, 138, 0.28), rgba(15, 23, 42, 0.85)) !important;
+            border: 1px solid rgba(59, 130, 246, 0.22) !important;
             border-radius: 10px !important;
             display: flex !important;
             flex-direction: column !important;
@@ -822,9 +1450,9 @@ export class YouTubeSummaryPanel {
 
           const timeBadge = document.createElement('button');
           timeBadge.style.cssText = `
-            background: rgba(245, 158, 11, 0.2) !important;
-            color: #FDE047 !important;
-            border: 1px solid rgba(245, 158, 11, 0.4) !important;
+            background: rgba(37, 99, 235, 0.25) !important;
+            color: #93C5FD !important;
+            border: 1px solid rgba(59, 130, 246, 0.45) !important;
             border-radius: 6px !important;
             padding: 2px 7px !important;
             font-size: 12px !important;
@@ -839,15 +1467,18 @@ export class YouTubeSummaryPanel {
           topRow.appendChild(timeBadge);
           card.appendChild(topRow);
 
+          const primarySummary = (sec.translatedSummary || sec.originalSummary).trim();
           const zhLine = document.createElement('div');
           zhLine.style.cssText = 'color: #f8fafc !important; font-weight: 600 !important; font-size: 13.5px !important;';
-          zhLine.textContent = sec.translatedSummary || sec.originalSummary;
+          zhLine.textContent = primarySummary;
           card.appendChild(zhLine);
 
-          const enLine = document.createElement('div');
-          enLine.style.cssText = 'color: #94a3b8 !important; font-size: 12px !important;';
-          enLine.textContent = sec.originalSummary;
-          card.appendChild(enLine);
+          if (sec.originalSummary && !isNearDuplicateText(sec.originalSummary, primarySummary)) {
+            const enLine = document.createElement('div');
+            enLine.style.cssText = 'color: #94a3b8 !important; font-size: 12px !important;';
+            enLine.textContent = sec.originalSummary;
+            card.appendChild(enLine);
+          }
 
           body.appendChild(card);
         }
@@ -861,15 +1492,15 @@ export class YouTubeSummaryPanel {
           align-items: flex-start !important;
           gap: 8px !important;
           padding: 7px 8px !important;
-          border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
+          border-bottom: 1px solid rgba(59, 130, 246, 0.12) !important;
         `;
 
         const tsBtn = document.createElement('button');
         tsBtn.style.cssText = `
           flex-shrink: 0 !important;
-          background: rgba(59, 130, 246, 0.18) !important;
+          background: rgba(37, 99, 235, 0.22) !important;
           color: #60a5fa !important;
-          border: none !important;
+          border: 1px solid rgba(59, 130, 246, 0.3) !important;
           border-radius: 4px !important;
           padding: 2px 6px !important;
           font-size: 11px !important;
@@ -888,15 +1519,17 @@ export class YouTubeSummaryPanel {
         enSpan.textContent = cue.originalText;
         textCol.appendChild(enSpan);
 
+        const hasDistinctTranslation =
+          Boolean(cue.translatedText) && cue.translatedText!.trim() !== cue.originalText.trim();
         const zhSpan = document.createElement('div');
         zhSpan.setAttribute('data-tk-cue-zh', String(cue.id));
         zhSpan.style.cssText = `
-          color: #FDE047 !important;
+          color: #93C5FD !important;
           font-size: 12.5px !important;
           font-weight: 500 !important;
-          display: ${cue.translatedText ? 'block' : 'none'} !important;
+          display: ${hasDistinctTranslation ? 'block' : 'none'} !important;
         `;
-        zhSpan.textContent = cue.translatedText || '';
+        zhSpan.textContent = hasDistinctTranslation ? cue.translatedText || '' : '';
         textCol.appendChild(zhSpan);
 
         row.appendChild(tsBtn);

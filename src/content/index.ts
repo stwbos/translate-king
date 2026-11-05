@@ -20,6 +20,7 @@ import { TargetLanguage, TranslationMode, RuntimeMessage, TranslateBatchResponse
 import { WordLookupResult } from '../background/dictionary';
 import { setupYouTubeLifecycle } from './youtube';
 import { setupBilibiliLifecycle } from './bilibili';
+import { setupUniversalVideoLifecycle } from './video/universal';
 import { setupInteractiveShortcuts } from './input-translate';
 import {
   setupFloatingBall,
@@ -108,6 +109,7 @@ if (typeof chrome !== 'undefined' && chrome.storage?.local) {
         activeTargetLang = data.targetLang;
         setupYouTubeLifecycle(activeTargetLang);
         setupBilibiliLifecycle(activeTargetLang);
+        setupUniversalVideoLifecycle(activeTargetLang);
       }
       if (typeof data.enableSelection === 'boolean') {
         enableSelection = data.enableSelection;
@@ -148,6 +150,7 @@ if (typeof chrome !== 'undefined' && chrome.storage?.local) {
           activeTargetLang = newLang;
           setupYouTubeLifecycle(activeTargetLang);
           setupBilibiliLifecycle(activeTargetLang);
+          setupUniversalVideoLifecycle(activeTargetLang);
         }
       }
       if (changes.enableSelection) {
@@ -174,9 +177,10 @@ if (typeof document !== 'undefined') {
   }
 }
 
-// 启动 YouTube 与 Bilibili 实时双语字幕引擎监听 (无条件顶层常驻)
+// 启动 YouTube、Bilibili 及全平台通用视频实时双语字幕与视频总结引擎监听 (无条件顶层常驻)
 setupYouTubeLifecycle(activeTargetLang);
 setupBilibiliLifecycle(activeTargetLang);
+setupUniversalVideoLifecycle(activeTargetLang);
 
 // 启动连按 3 次空格输入框翻译 & 按住 Alt 鼠标悬停单段即时翻译
 setupInteractiveShortcuts(() => activeTargetLang);
@@ -639,6 +643,7 @@ async function translateFullPage(
     activeTranslationMode = mode;
     setupYouTubeLifecycle(activeTargetLang);
     setupBilibiliLifecycle(activeTargetLang);
+    setupUniversalVideoLifecycle(activeTargetLang);
 
     const blocks = extractTranslatableBlocks(document, activeTargetLang);
     if (blocks.length === 0) {

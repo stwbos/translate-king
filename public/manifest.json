@@ -36,7 +36,7 @@
       "run_at": "document_idle"
     },
     {
-      "matches": ["*://*.youtube.com/*"],
+      "matches": ["*://*.youtube.com/*", "*://*.bilibili.com/*"],
       "js": ["yt-bridge.js"],
       "run_at": "document_start",
       "world": "MAIN"
@@ -44,8 +44,19 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["yt-bridge.js"],
-      "matches": ["*://*.youtube.com/*"]
+      "resources": [
+        "icons/icon-16.png",
+        "icons/icon-32.png",
+        "icons/icon-48.png",
+        "icons/icon-128.png"
+      ],
+      "matches": ["<all_urls>"]
+    },
+    {
+      "resources": [
+        "yt-bridge.js"
+      ],
+      "matches": ["*://*.youtube.com/*", "*://*.bilibili.com/*"]
     }
   ],
   "icons": {

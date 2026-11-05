@@ -15,8 +15,60 @@ import {
   updateSubtitleConfig,
   onSubtitleConfigChange,
   initSubtitleConfig,
-  toggleSubtitleSettingsMenu
+  toggleSubtitleSettingsMenu,
+  formatSrtTime
 } from '../youtube/subtitle-menu';
+import {
+  YouTubeSummaryPanel,
+  getSharedVideoCues,
+  recordObservedVideoCue
+} from '../youtube/summary-panel';
+import { createTranslateKingLogoElement } from '../logo';
+
+let biliSummaryPanel: YouTubeSummaryPanel | null = null;
+
+export function openBiliVideoSummaryPanel(): void {
+  if (biliObserver) {
+    biliObserver.ensureNativeCcEnabled();
+  }
+  if (!biliSummaryPanel) {
+    biliSummaryPanel = new YouTubeSummaryPanel(currentTargetLang);
+  }
+  biliSummaryPanel.togglePanel();
+}
+
+function downloadBiliVideoSrt(): void {
+  const cues = getSharedVideoCues();
+  if (!cues || cues.length === 0) {
+    showBiliPlayerStatusToast('请先打开视频总结或播放片段以加载字幕数据');
+    return;
+  }
+
+  const lines: string[] = [];
+  cues.forEach((cue, idx) => {
+    lines.push(String(idx + 1));
+    lines.push(`${formatSrtTime(cue.startMs)} --> ${formatSrtTime(cue.endMs)}`);
+    lines.push(cue.originalText);
+    if (cue.translatedText && cue.translatedText.trim() !== cue.originalText.trim()) {
+      lines.push(cue.translatedText);
+    }
+    lines.push('');
+  });
+
+  const blob = new Blob([lines.join('\r\n')], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const bvidMatch = window.location.pathname.match(/\/video\/(BV[a-zA-Z0-9]+)/i);
+  const vid = bvidMatch ? bvidMatch[1] : 'bilibili';
+  a.download = `TranslateKing_${vid}_bilingual.srt`;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    a.remove();
+    URL.revokeObjectURL(url);
+  }, 500);
+}
 
 function isBilibili(): boolean {
   if (typeof window === 'undefined') return false;
@@ -73,9 +125,38 @@ function showBiliPlayerStatusToast(text: string): void {
 }
 
 /**
- * 挂载 Bilibili 控制栏双语字幕切换按钮
+ * 更新 Bilibili 底栏翻译王 Logo 按钮的视觉状态（幂等守卫，绝不重复销毁重建子节点）
  */
-function mountBiliControlButton(targetLang: TargetLanguage): void {
+function updateBiliButtonVisual(btn: HTMLElement, force = false): void {
+  const cfg = getSubtitleConfig();
+  const targetState = cfg.enabled ? 'true' : 'false';
+  if (!force && btn.getAttribute('data-tk-enabled') === targetState && btn.firstChild) {
+    return;
+  }
+  btn.setAttribute('data-tk-enabled', targetState);
+
+  while (btn.firstChild) {
+    btn.removeChild(btn.firstChild);
+  }
+
+  const logoWrap = createTranslateKingLogoElement(22, 'bili');
+  if (cfg.enabled) {
+    btn.setAttribute('title', '翻译王双语字幕设置 (当前已开启)');
+    btn.classList.add('tk-active');
+    logoWrap.style.filter = 'drop-shadow(0 1px 3px rgba(37, 99, 235, 0.45))';
+  } else {
+    btn.setAttribute('title', '翻译王双语字幕设置 (当前已关闭)');
+    btn.classList.remove('tk-active');
+    logoWrap.style.filter = 'grayscale(1) opacity(0.45)';
+  }
+
+  btn.appendChild(logoWrap);
+}
+
+/**
+ * 挂载 Bilibili 控制栏官方统一品牌 Logo 按钮（点击直接打开字幕设置菜单）
+ */
+export function mountBiliControlButton(targetLang: TargetLanguage): void {
   if (typeof document === 'undefined') return;
   const controlsRight =
     document.querySelector('.bpx-player-control-bottom-right') ||
@@ -84,8 +165,7 @@ function mountBiliControlButton(targetLang: TargetLanguage): void {
   if (!controlsRight) return;
 
   const btnId = 'translate-king-bili-control-btn';
-  let btn = document.getElementById(btnId);
-  const cfg = getSubtitleConfig();
+  let btn = document.getElementById(btnId) as HTMLElement | null;
 
   if (!btn || !controlsRight.contains(btn)) {
     if (!btn) {
@@ -94,75 +174,53 @@ function mountBiliControlButton(targetLang: TargetLanguage): void {
       btn.className = 'bpx-player-ctrl-btn translate-king-bili-control-btn';
       btn.setAttribute('translate', 'no');
       btn.setAttribute('role', 'button');
-      btn.setAttribute('title', '翻译王 - 实时双语字幕与设置');
+      btn.setAttribute('aria-label', '翻译王双语字幕设置');
 
-      // SVG 图标
-      const svgNS = 'http://www.w3.org/2000/svg';
-      const svg = document.createElementNS(svgNS, 'svg');
-      svg.setAttribute('width', '14');
-      svg.setAttribute('height', '14');
-      svg.setAttribute('viewBox', '0 0 24 24');
-      svg.setAttribute('fill', 'currentColor');
-      svg.style.cssText = 'margin-right: 3px; pointer-events: none; flex-shrink: 0;';
-      const path = document.createElementNS(svgNS, 'path');
-      path.setAttribute(
-        'd',
-        'M12.87 15.07l-2.54-2.51.03-.08c1.74-1.94 2.98-4.17 3.71-6.49H17V4h-7V2H8v2H1v1.99h11.17C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02L4 19l5-5 3.11 3.11.76-2.04zM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2l-4.5-12zm-2.62 7l1.62-4.33L19.12 17h-3.24z'
-      );
-      svg.appendChild(path);
-      btn.appendChild(svg);
-
-      // 标签文本
-      const labelSpan = document.createElement('span');
-      labelSpan.className = 'tk-bili-btn-label';
-      labelSpan.style.cssText = 'cursor: pointer; margin-right: 3px; user-select: none;';
-      btn.appendChild(labelSpan);
-
-      // 设置图标
-      const gearSpan = document.createElement('span');
-      gearSpan.className = 'tk-bili-btn-gear';
-      gearSpan.textContent = '⚙';
-      gearSpan.style.cssText = 'cursor: pointer; font-size: 13px; opacity: 0.85; padding: 0 1px; user-select: none;';
-      gearSpan.setAttribute('title', '打开字幕设置菜单');
-      btn.appendChild(gearSpan);
-
-      // 点击主体切换开关
-      labelSpan.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const current = getSubtitleConfig();
-        const nextEnabled = !current.enabled;
-        updateSubtitleConfig({ enabled: nextEnabled });
-        showBiliPlayerStatusToast(nextEnabled ? '双语字幕 已开启' : '双语字幕 已关闭');
-
-        // 检查当前是否有 CC 字幕在播放
-        const activeSubtitle = document.querySelector(
-          '.bili-subtitle-x-subtitle-panel-text, .bpx-player-subtitle-panel-text, .bilibili-player-video-subtitle'
-        );
-        if (nextEnabled && !activeSubtitle) {
-          showBiliPlayerStatusToast('若画面未显示字幕，请在右下角开启播放器 CC 字幕');
-        }
-      });
-
-      // 点击齿轮打开设置控制台
-      gearSpan.addEventListener('click', (e) => {
-        e.stopPropagation();
+      const openSettings = () => {
         toggleSubtitleSettingsMenu({
-          onToggleEnabled: (en) => updateSubtitleConfig({ enabled: en }),
+          onToggleEnabled: (en) => {
+            updateSubtitleConfig({ enabled: en });
+            if (btn) updateBiliButtonVisual(btn, true);
+            showBiliPlayerStatusToast(en ? '双语字幕 已开启' : '双语字幕 已关闭');
+            const activeSubtitle = document.querySelector(
+              '.bili-subtitle-x-subtitle-panel-text, .bpx-player-subtitle-panel-text, .bilibili-player-video-subtitle'
+            );
+            if (en && !activeSubtitle) {
+              showBiliPlayerStatusToast('若画面未显示字幕，请在右下角开启播放器 CC 字幕');
+            }
+          },
           onChangeTargetLang: (lang) => {
             currentTargetLang = lang;
             updateSubtitleConfig({ targetLang: lang });
             if (biliObserver) {
               biliObserver.setTargetLang(lang);
             }
-            mountBiliControlButton(lang);
+            if (biliSummaryPanel) {
+              biliSummaryPanel.setTargetLang(lang);
+            }
+            if (btn) updateBiliButtonVisual(btn, true);
           },
-          onOpenSummary: () => {},
-          onDownloadSrt: () => {}
+          onOpenSummary: () => openBiliVideoSummaryPanel(),
+          onDownloadSrt: () => downloadBiliVideoSrt()
         });
+      };
+
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        openSettings();
+      });
+
+      btn.addEventListener('contextmenu', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        openSettings();
       });
     }
 
-    // 挂载到控制条（紧邻 CC 字幕按钮左侧）
+    updateBiliButtonVisual(btn, true);
+
+    // 挂载到控制条（紧邻 CC 字幕按钮左侧或控制区最左侧）
     const subtitleCtrl =
       controlsRight.querySelector('.bpx-player-ctrl-subtitle') ||
       controlsRight.querySelector('.bpx-player-ctrl-setting') ||
@@ -172,14 +230,83 @@ function mountBiliControlButton(targetLang: TargetLanguage): void {
     } else {
       controlsRight.appendChild(btn);
     }
+  } else {
+    updateBiliButtonVisual(btn, false);
   }
+}
 
-  // 刷新按钮状态高亮
-  const label = btn.querySelector('.tk-bili-btn-label');
-  if (label) {
-    label.textContent = cfg.enabled ? '双语 ON' : '双语 OFF';
+/**
+ * 在 Bilibili 视频下方工具栏 (点赞/投币/收藏/分享栏) 注入 [✨ 视频总结] 按钮
+ */
+export function injectBiliSummaryActionButton(): boolean {
+  if (typeof document === 'undefined') return false;
+
+  try {
+    const toolbarContainer = (
+      document.querySelector('.video-toolbar-left') ||
+      document.querySelector('.video-toolbar-v1') ||
+      document.querySelector('#arc_toolbar_report .toolbar-left') ||
+      document.querySelector('#arc_toolbar_report') ||
+      document.querySelector('.video-toolbar-container')
+    ) as HTMLElement | null;
+
+    if (!toolbarContainer) return false;
+
+    const existingBtn = document.getElementById('translate-king-bili-summary-btn') as HTMLElement | null;
+    if (existingBtn) {
+      if (toolbarContainer.contains(existingBtn)) {
+        return true;
+      } else {
+        existingBtn.remove();
+      }
+    }
+
+    const summaryBtn = document.createElement('button');
+    summaryBtn.id = 'translate-king-bili-summary-btn';
+    summaryBtn.className = 'translate-king-bili-action-btn';
+    summaryBtn.setAttribute('translate', 'no');
+    summaryBtn.setAttribute('title', '翻译王：提取视频全程时间轴与字幕生成中文总结');
+    summaryBtn.style.cssText = `
+      display: inline-flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      gap: 6px !important;
+      height: 32px !important;
+      padding: 0 14px !important;
+      margin: 0 12px 0 8px !important;
+      border-radius: 16px !important;
+      font-size: 13px !important;
+      font-weight: 600 !important;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif !important;
+      cursor: pointer !important;
+      border: 1px solid rgba(59, 130, 246, 0.5) !important;
+      background: linear-gradient(135deg, rgba(30, 64, 175, 0.9), rgba(37, 99, 235, 0.9)) !important;
+      color: #FFFFFF !important;
+      outline: none !important;
+      box-sizing: border-box !important;
+      vertical-align: middle !important;
+      user-select: none !important;
+      flex-shrink: 0 !important;
+      transition: transform 0.15s ease, box-shadow 0.15s ease !important;
+      z-index: 10 !important;
+    `;
+    const btnLogo = createTranslateKingLogoElement(16, 'bili-summary');
+    const btnLabel = document.createElement('span');
+    btnLabel.textContent = '视频总结';
+    summaryBtn.appendChild(btnLogo);
+    summaryBtn.appendChild(btnLabel);
+    summaryBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      openBiliVideoSummaryPanel();
+    });
+
+    toolbarContainer.appendChild(summaryBtn);
+    return true;
+  } catch (err) {
+    console.warn('[TranslateKing Bilibili] 挂载视频总结按钮异常:', err);
+    return false;
   }
-  btn.classList.toggle('tk-active', cfg.enabled);
 }
 
 export class BiliCaptionObserver {
@@ -351,35 +478,45 @@ export class BiliCaptionObserver {
     style.id = styleId;
     style.textContent = `
       .translate-king-bili-bilingual-line {
-        display: flex !important;
+        position: absolute !important;
+        bottom: 54px !important;
+        left: 50% !important;
+        transform: translateX(-50%) !important;
+        display: inline-flex !important;
         flex-direction: column !important;
         align-items: center !important;
         justify-content: center !important;
-        width: 100% !important;
-        max-width: 92% !important;
-        margin: 4px auto 0 auto !important;
+        gap: 3px !important;
+        width: auto !important;
+        max-width: 88% !important;
+        padding: 5px 14px !important;
+        border-radius: 8px !important;
         text-align: center !important;
         pointer-events: none !important;
-        z-index: 100 !important;
+        z-index: 999999 !important;
         box-sizing: border-box !important;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45) !important;
       }
 
-      .bpx-player-container > .translate-king-bili-bilingual-line,
-      .bpx-player-video-area > .translate-king-bili-bilingual-line {
-        position: absolute !important;
-        bottom: 70px !important;
-        left: 0 !important;
-        right: 0 !important;
+      .translate-king-bili-orig-text {
+        display: block !important;
+        font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", Roboto, "Helvetica Neue", sans-serif !important;
+        font-weight: 500 !important;
+        color: #F8FAFC !important;
+        line-height: 1.3 !important;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.95) !important;
+        word-break: break-word !important;
+        white-space: pre-wrap !important;
       }
 
       .translate-king-bili-trans-text {
-        display: inline-block !important;
+        display: block !important;
         font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", Roboto, "Helvetica Neue", sans-serif !important;
         font-weight: 600 !important;
         line-height: 1.35 !important;
         letter-spacing: 0.02em !important;
-        padding: 3px 12px !important;
-        border-radius: 6px !important;
+        padding: 1px 4px !important;
+        border-radius: 4px !important;
         text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95), 0 0 2px rgba(0, 0, 0, 0.9) !important;
         box-sizing: border-box !important;
         word-break: break-word !important;
@@ -391,34 +528,25 @@ export class BiliCaptionObserver {
         display: inline-flex !important;
         align-items: center !important;
         justify-content: center !important;
-        height: 22px !important;
-        line-height: 20px !important;
-        padding: 0 6px !important;
-        margin-right: 6px !important;
-        background: rgba(255, 255, 255, 0.12) !important;
-        border: 1px solid rgba(255, 255, 255, 0.22) !important;
-        border-radius: 4px !important;
-        color: #ffffff !important;
-        font-size: 11.5px !important;
-        font-weight: 500 !important;
+        width: 36px !important;
+        min-width: 36px !important;
+        height: 100% !important;
+        padding: 0 !important;
+        margin: 0 2px !important;
+        background: transparent !important;
+        border: none !important;
         cursor: pointer !important;
         user-select: none !important;
         flex-shrink: 0 !important;
-        white-space: nowrap !important;
         align-self: center !important;
-        transition: background 0.15s ease, border-color 0.15s ease !important;
+        opacity: 0.92 !important;
+        transition: opacity 0.15s ease, transform 0.15s ease !important;
         z-index: 10 !important;
       }
 
       .translate-king-bili-control-btn:hover {
-        background: rgba(255, 255, 255, 0.22) !important;
-        border-color: rgba(59, 130, 246, 0.6) !important;
-      }
-
-      .translate-king-bili-control-btn.tk-active {
-        background: rgba(37, 99, 235, 0.85) !important;
-        border-color: #60a5fa !important;
-        color: #ffffff !important;
+        opacity: 1 !important;
+        transform: scale(1.08) !important;
       }
     `;
     document.head.appendChild(style);
@@ -481,9 +609,13 @@ export class BiliCaptionObserver {
       return;
     }
 
-    // 排除已挂载的译文节点
+    // 排除已挂载的译文节点与 B站 AI 角标水印
     const clone = textEl.cloneNode(true) as HTMLElement;
-    clone.querySelectorAll('.translate-king-bilingual-line, .translate-king-bili-bilingual-line').forEach((n) => n.remove());
+    clone
+      .querySelectorAll(
+        '.translate-king-bilingual-line, .translate-king-bili-bilingual-line, .bili-subtitle-x-subtitle-panel-ai-mark, .bpx-player-subtitle-panel-ai-mark, [class*="ai-mark"]'
+      )
+      .forEach((n) => n.remove());
     const rawText = (clone.textContent || '').trim();
 
     if (!rawText) {
@@ -499,10 +631,10 @@ export class BiliCaptionObserver {
 
     this.lastProcessedText = rawText;
 
-    const effectiveLang = cfg.targetLang || this.targetLang || 'zh-CN';
-
+    const effectiveLang: TargetLanguage = (cfg.targetLang || this.targetLang || 'zh-CN') as TargetLanguage;
+    const cacheKey = `${effectiveLang}:::${rawText}`;
     // 检查缓存
-    const cached = this.translationCache.get(rawText);
+    const cached = this.translationCache.get(cacheKey) || this.translationCache.get(rawText);
     if (cached) {
       this.renderBilingualLine(rawText, cached);
     } else {
@@ -519,6 +651,7 @@ export class BiliCaptionObserver {
               if (res && Array.isArray(res.translations) && res.translations[0]) {
                 const trans = res.translations[0];
                 this.translationCache.set(rawText, trans);
+                this.translationCache.set(cacheKey, trans);
                 if (this.isRunning && this.lastProcessedText === rawText) {
                   this.renderBilingualLine(rawText, trans);
                 }
@@ -537,15 +670,14 @@ export class BiliCaptionObserver {
       return;
     }
 
+    // 优先挂载在 .bpx-player-video-area 或 .bpx-player-container 顶层，彻底脱离 B站原生 .bili-subtitle-x-subtitle-panel-position 内部的绝对定位覆盖与重绘销毁
     const parentPanel =
-      document.querySelector('.bili-subtitle-x-subtitle-panel-position') ||
-      document.querySelector('.bili-subtitle-x-subtitle-panel-wrap') ||
-      document.querySelector('.bili-subtitle-x-subtitle-panel') ||
-      document.querySelector('.bpx-player-subtitle-panel-position') ||
-      document.querySelector('.bpx-player-subtitle-panel') ||
-      document.querySelector('.bpx-player-subtitle-wrap') ||
       document.querySelector('.bpx-player-video-area') ||
-      document.querySelector('.bpx-player-container');
+      document.querySelector('.bpx-player-container') ||
+      document.querySelector('.bpx-player-subtitle-wrap') ||
+      document.querySelector('.bili-subtitle-x-subtitle-panel-wrap') ||
+      document.querySelector('.bpx-player-subtitle-panel-position') ||
+      document.querySelector('.bili-subtitle-x-subtitle-panel-position');
 
     if (!parentPanel) return;
 
@@ -555,24 +687,30 @@ export class BiliCaptionObserver {
       bilingualLine.id = 'translate-king-bili-subtitle-line';
       bilingualLine.className = 'translate-king-bilingual-line translate-king-bili-bilingual-line';
       bilingualLine.setAttribute('translate', 'no');
+      bilingualLine.setAttribute('data-tk-ignore', 'true');
       parentPanel.appendChild(bilingualLine);
     } else if (bilingualLine.parentElement !== parentPanel) {
       parentPanel.appendChild(bilingualLine);
     }
 
-    // 根据模式控制原生字幕显示隐藏
+    // 接管字幕渲染后，将 B站原生灰色 AI 字幕框及外层背景容器隐藏 (opacity: 0; visibility: hidden)，
+    // 由我们的 #translate-king-bili-subtitle-line 统一在视频底部同一弹性框内渲染【原文 + 译文】，100% 根治原生 AI 字幕框残留与遮挡问题！
     const nativeEls = document.querySelectorAll<HTMLElement>(
-      '.bili-subtitle-x-subtitle-panel-text, .bpx-player-subtitle-panel-text, .bilibili-player-video-subtitle'
+      '.bili-subtitle-x-subtitle-panel, .bpx-player-subtitle-panel, .bili-subtitle-x-subtitle-panel-position, .bpx-player-subtitle-panel-position, .bili-subtitle-x-subtitle-panel-text, .bpx-player-subtitle-panel-text, .bili-subtitle-x-subtitle-panel-major-group, .bpx-player-subtitle-panel-major-group, .bili-subtitle-x-subtitle-panel-ai-mark, .bpx-player-subtitle-panel-ai-mark, .bilibili-player-video-subtitle'
     );
     nativeEls.forEach((nativeEl) => {
-      if (cfg.displayMode === 'translation-only') {
+      if (!nativeEl.contains(bilingualLine!)) {
         nativeEl.style.setProperty('opacity', '0', 'important');
         nativeEl.style.setProperty('visibility', 'hidden', 'important');
-      } else {
-        nativeEl.style.removeProperty('opacity');
-        nativeEl.style.removeProperty('visibility');
       }
     });
+
+    let origSpan = bilingualLine.querySelector<HTMLElement>('.translate-king-bili-orig-text');
+    if (!origSpan) {
+      origSpan = document.createElement('span');
+      origSpan.className = 'translate-king-orig-text translate-king-bili-orig-text';
+      bilingualLine.appendChild(origSpan);
+    }
 
     let textSpan = bilingualLine.querySelector<HTMLElement>('.translate-king-bili-trans-text');
     if (!textSpan) {
@@ -581,13 +719,35 @@ export class BiliCaptionObserver {
       bilingualLine.appendChild(textSpan);
     }
 
+    origSpan.textContent = origText;
     textSpan.textContent = transText;
+    recordObservedVideoCue(origText, transText);
 
-    // 动态应用样式
+    // 动态应用样式：字幕始终位于视频底部 (bottom: 54px)，
+    // 译文位置“原文上方 (top)”表示【译文在原文的上方 (column-reverse)】，“原文下方 (bottom)”表示【译文在原文的下方 (column)】
     const baseFontSize = Math.round(20 * (cfg.fontScale || 1.0));
+    const origFontSize = Math.max(13, Math.round(baseFontSize * 0.85));
+    const bgAlpha = typeof cfg.bgOpacity === 'number' ? cfg.bgOpacity : 0.78;
+    const isSameText = origText.trim() === transText.trim();
+
+    bilingualLine.style.setProperty('background', `rgba(0, 0, 0, ${bgAlpha})`, 'important');
+    bilingualLine.style.setProperty('bottom', '54px', 'important');
+    bilingualLine.style.setProperty('top', 'auto', 'important');
+    bilingualLine.style.setProperty(
+      'flex-direction',
+      cfg.position === 'top' ? 'column-reverse' : 'column',
+      'important'
+    );
+
+    origSpan.style.setProperty('font-size', `${origFontSize}px`, 'important');
+    origSpan.style.setProperty(
+      'display',
+      cfg.displayMode === 'translation-only' || isSameText ? 'none' : 'block',
+      'important'
+    );
+
     textSpan.style.setProperty('font-size', `${baseFontSize}px`, 'important');
     textSpan.style.setProperty('color', cfg.textColor || '#FEF08A', 'important');
-    const bgAlpha = typeof cfg.bgOpacity === 'number' ? cfg.bgOpacity : 0.78;
     textSpan.style.setProperty('background', `rgba(0, 0, 0, ${bgAlpha})`, 'important');
   }
 
@@ -601,25 +761,47 @@ export class BiliCaptionObserver {
       return;
     }
 
+    const baseFontSize = Math.round(20 * (cfg.fontScale || 1.0));
+    const origFontSize = Math.max(13, Math.round(baseFontSize * 0.85));
+    const bgAlpha = typeof cfg.bgOpacity === 'number' ? cfg.bgOpacity : 0.78;
+
+    line.style.setProperty('background', `rgba(0, 0, 0, ${bgAlpha})`, 'important');
+    line.style.setProperty('bottom', '54px', 'important');
+    line.style.setProperty('top', 'auto', 'important');
+    line.style.setProperty(
+      'flex-direction',
+      cfg.position === 'top' ? 'column-reverse' : 'column',
+      'important'
+    );
+
+    const origSpan = line.querySelector<HTMLElement>('.translate-king-bili-orig-text');
     const textSpan = line.querySelector<HTMLElement>('.translate-king-bili-trans-text');
+    const isSameText =
+      Boolean(origSpan && textSpan) &&
+      (origSpan?.textContent || '').trim() === (textSpan?.textContent || '').trim();
+
+    if (origSpan) {
+      origSpan.style.setProperty('font-size', `${origFontSize}px`, 'important');
+      origSpan.style.setProperty(
+        'display',
+        cfg.displayMode === 'translation-only' || isSameText ? 'none' : 'block',
+        'important'
+      );
+    }
+
     if (textSpan) {
-      const baseFontSize = Math.round(20 * (cfg.fontScale || 1.0));
       textSpan.style.setProperty('font-size', `${baseFontSize}px`, 'important');
       textSpan.style.setProperty('color', cfg.textColor || '#FEF08A', 'important');
-      const bgAlpha = typeof cfg.bgOpacity === 'number' ? cfg.bgOpacity : 0.78;
       textSpan.style.setProperty('background', `rgba(0, 0, 0, ${bgAlpha})`, 'important');
     }
 
     const nativeEls = document.querySelectorAll<HTMLElement>(
-      '.bili-subtitle-x-subtitle-panel-text, .bpx-player-subtitle-panel-text, .bilibili-player-video-subtitle'
+      '.bili-subtitle-x-subtitle-panel, .bpx-player-subtitle-panel, .bili-subtitle-x-subtitle-panel-position, .bpx-player-subtitle-panel-position, .bili-subtitle-x-subtitle-panel-text, .bpx-player-subtitle-panel-text, .bili-subtitle-x-subtitle-panel-major-group, .bpx-player-subtitle-panel-major-group, .bili-subtitle-x-subtitle-panel-ai-mark, .bpx-player-subtitle-panel-ai-mark, .bilibili-player-video-subtitle'
     );
     nativeEls.forEach((nativeEl) => {
-      if (cfg.displayMode === 'translation-only') {
+      if (!nativeEl.contains(line)) {
         nativeEl.style.setProperty('opacity', '0', 'important');
         nativeEl.style.setProperty('visibility', 'hidden', 'important');
-      } else {
-        nativeEl.style.removeProperty('opacity');
-        nativeEl.style.removeProperty('visibility');
       }
     });
   }
@@ -630,7 +812,7 @@ export class BiliCaptionObserver {
     if (line) line.remove();
 
     const nativeEls = document.querySelectorAll<HTMLElement>(
-      '.bili-subtitle-x-subtitle-panel-text, .bpx-player-subtitle-panel-text, .bilibili-player-video-subtitle'
+      '.bili-subtitle-x-subtitle-panel, .bpx-player-subtitle-panel, .bili-subtitle-x-subtitle-panel-position, .bpx-player-subtitle-panel-position, .bili-subtitle-x-subtitle-panel-text, .bpx-player-subtitle-panel-text, .bili-subtitle-x-subtitle-panel-major-group, .bpx-player-subtitle-panel-major-group, .bili-subtitle-x-subtitle-panel-ai-mark, .bpx-player-subtitle-panel-ai-mark, .bilibili-player-video-subtitle'
     );
     nativeEls.forEach((nativeEl) => {
       nativeEl.style.removeProperty('opacity');
@@ -657,19 +839,26 @@ export function setupBilibiliLifecycle(targetLang: TargetLanguage): void {
   } else {
     biliObserver.setTargetLang(targetLang);
   }
+  if (biliSummaryPanel) {
+    biliSummaryPanel.setTargetLang(targetLang);
+  }
 
   mountBiliControlButton(targetLang);
+  injectBiliSummaryActionButton();
 
   // 监听单页切集或切视频
   if (!domPollTimer) {
     domPollTimer = setInterval(() => {
       const match = window.location.pathname.match(/\/video\/(BV[a-zA-Z0-9]+)/i);
-      const bvid = match ? match[1] : null;
+      const p = new URLSearchParams(window.location.search).get('p') || '1';
+      const bvid = match ? `${match[1]}_p${p}` : null;
       if (bvid && bvid !== currentBvid) {
         currentBvid = bvid;
         biliObserver?.resetVideo();
+        biliSummaryPanel?.resetForNewVideo(bvid);
       }
       mountBiliControlButton(currentTargetLang);
+      injectBiliSummaryActionButton();
     }, 500);
   }
 }

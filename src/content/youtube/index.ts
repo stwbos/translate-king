@@ -21,6 +21,7 @@ import {
   formatSrtTime
 } from './subtitle-menu';
 import { TargetLanguage } from '../../types';
+import { createTranslateKingSvgLogo, createTranslateKingLogoElement } from '../logo';
 
 let nativeObserver: NativeCaptionObserver | null = null;
 let summaryPanel: YouTubeSummaryPanel | null = null;
@@ -63,28 +64,6 @@ function getVideoIdFromUrl(): string | null {
 
   const match = window.location.pathname.match(/\/(?:shorts|live|embed|v)\/([a-zA-Z0-9_-]+)/);
   return match ? match[1] : null;
-}
-
-/**
- * 纯 DOM API 构建 SVG 翻译图标（规避 YouTube TrustedHTML CSP 拦截）
- */
-function createTranslateIconSvg(size: number): SVGSVGElement {
-  const svgNS = 'http://www.w3.org/2000/svg';
-  const svg = document.createElementNS(svgNS, 'svg');
-  svg.setAttribute('width', String(size));
-  svg.setAttribute('height', String(size));
-  svg.setAttribute('viewBox', '0 0 24 24');
-  svg.setAttribute('fill', 'currentColor');
-  svg.style.cssText =
-    'display: inline-block !important; vertical-align: middle !important; flex-shrink: 0 !important; pointer-events: none !important;';
-
-  const path = document.createElementNS(svgNS, 'path');
-  path.setAttribute(
-    'd',
-    'M12.87 15.07l-2.54-2.51.03-.08c1.74-1.94 2.98-4.17 3.71-6.49H17V4h-7V2H8v2H1v1.99h11.17C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02L4 19l5-5 3.11 3.11.76-2.04zM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2l-4.5-12zm-2.62 7l1.62-4.33L19.12 17h-3.24z'
-  );
-  svg.appendChild(path);
-  return svg;
 }
 
 /**
@@ -237,61 +216,40 @@ function injectBottomControls(): boolean {
     btn.id = 'translate-king-yt-control-btn';
     btn.className = 'ytp-button translate-king-yt-control-btn';
     btn.setAttribute('translate', 'no');
-    btn.setAttribute('aria-label', '翻译王双语字幕与设置');
+    btn.setAttribute('aria-label', '翻译王双语字幕设置');
     btn.style.cssText = `
       display: inline-flex !important;
       align-items: center !important;
       justify-content: center !important;
       vertical-align: top !important;
-      width: auto !important;
-      min-width: 82px !important;
+      width: 40px !important;
+      min-width: 40px !important;
       height: 100% !important;
-      margin: 0 6px 0 0 !important;
-      padding: 0 4px !important;
+      margin: 0 2px !important;
+      padding: 0 !important;
       cursor: pointer !important;
       background: transparent !important;
       border: none !important;
       outline: none !important;
       line-height: normal !important;
       overflow: visible !important;
-      opacity: 1 !important;
+      opacity: 0.92 !important;
       visibility: visible !important;
       box-sizing: border-box !important;
+      transition: opacity 0.15s ease, transform 0.15s ease !important;
       z-index: 100 !important;
     `;
 
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      e.preventDefault();
-      const target = e.target as HTMLElement | null;
-      // 如果点击的是右侧齿轮设置区，弹出多维字幕设置菜单
-      if (target && target.closest('[data-tk-role="settings-trigger"]')) {
-        toggleSubtitleSettingsMenu({
-          onToggleEnabled: (enabled) => toggleSubtitles(enabled),
-          onChangeTargetLang: (lang) => {
-            currentTargetLang = lang;
-            if (nativeObserver) {
-              nativeObserver.setTargetLang(lang);
-            }
-            if (summaryPanel) {
-              summaryPanel.setTargetLang(lang);
-            }
-            const bottomBtn = document.getElementById('translate-king-yt-control-btn');
-            if (bottomBtn) updateButtonVisual(bottomBtn, isSubtitlesEnabled);
-          },
-          onOpenSummary: () => openVideoSummaryPanel(),
-          onDownloadSrt: () => downloadCurrentVideoSrt()
-        });
-        return;
-      }
-      // 否则直接切换双语字幕主开关
-      toggleSubtitles();
+    btn.addEventListener('mouseenter', () => {
+      btn.style.opacity = '1';
+      btn.style.transform = 'scale(1.08)';
+    });
+    btn.addEventListener('mouseleave', () => {
+      btn.style.opacity = '0.92';
+      btn.style.transform = 'scale(1)';
     });
 
-    // 支持右键直接呼出字幕设置菜单
-    btn.addEventListener('contextmenu', (e) => {
-      e.stopPropagation();
-      e.preventDefault();
+    const openSettings = () => {
       toggleSubtitleSettingsMenu({
         onToggleEnabled: (enabled) => toggleSubtitles(enabled),
         onChangeTargetLang: (lang) => {
@@ -303,11 +261,25 @@ function injectBottomControls(): boolean {
             summaryPanel.setTargetLang(lang);
           }
           const bottomBtn = document.getElementById('translate-king-yt-control-btn');
-          if (bottomBtn) updateButtonVisual(bottomBtn, isSubtitlesEnabled);
+          if (bottomBtn) updateButtonVisual(bottomBtn, true);
         },
         onOpenSummary: () => openVideoSummaryPanel(),
         onDownloadSrt: () => downloadCurrentVideoSrt()
       });
+    };
+
+    // 一键直达设置控制台（无需额外点击开启，进入视频已全自动就绪）
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      openSettings();
+    });
+
+    // 支持右键直接呼出字幕设置控制台
+    btn.addEventListener('contextmenu', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      openSettings();
     });
 
     updateButtonVisual(btn, true);
@@ -380,7 +352,11 @@ function injectSummaryActionButton(): boolean {
       user-select: none !important;
       z-index: 10 !important;
     `;
-    summaryBtn.textContent = '✨ 视频总结';
+    const btnLogo = createTranslateKingLogoElement(16, 'yt-summary');
+    const btnLabel = document.createElement('span');
+    btnLabel.textContent = '视频总结';
+    summaryBtn.appendChild(btnLogo);
+    summaryBtn.appendChild(btnLabel);
     summaryBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       e.preventDefault();
@@ -411,98 +387,22 @@ function updateButtonVisual(btn: HTMLElement, force = false): void {
     btn.removeChild(btn.firstChild);
   }
 
-  const pill = document.createElement('span');
-  pill.className = 'translate-king-btn-pill';
-
+  const logoWrap = createTranslateKingLogoElement(22);
   if (isSubtitlesEnabled) {
-    pill.style.cssText = `
-      display: inline-flex !important;
-      align-items: center !important;
-      justify-content: center !important;
-      gap: 4px !important;
-      background: linear-gradient(135deg, #2563EB 0%, #3B82F6 100%) !important;
-      color: #FFFFFF !important;
-      padding: 2px 6px 2px 8px !important;
-      border-radius: 12px !important;
-      font-weight: 700 !important;
-      font-size: 11px !important;
-      line-height: 16px !important;
-      letter-spacing: 0.2px !important;
-      user-select: none !important;
-      white-space: nowrap !important;
-      height: 22px !important;
-      box-shadow: 0 2px 8px rgba(37, 99, 235, 0.4) !important;
-    `;
-    btn.setAttribute('title', '左键切换双语字幕 · 点击右侧 ⚙ 调节字幕样式/位置/下载SRT');
+    btn.setAttribute('title', '翻译王 · 双语字幕设置');
+    btn.setAttribute('aria-label', '翻译王双语字幕设置');
+    logoWrap.style.filter = 'drop-shadow(0 1px 3px rgba(37, 99, 235, 0.45))';
   } else {
-    pill.style.cssText = `
-      display: inline-flex !important;
-      align-items: center !important;
-      justify-content: center !important;
-      gap: 4px !important;
-      background: rgba(255, 255, 255, 0.18) !important;
-      color: rgba(255, 255, 255, 0.9) !important;
-      padding: 2px 6px 2px 8px !important;
-      border-radius: 12px !important;
-      font-weight: 600 !important;
-      font-size: 11px !important;
-      line-height: 16px !important;
-      letter-spacing: 0.2px !important;
-      user-select: none !important;
-      white-space: nowrap !important;
-      height: 22px !important;
-    `;
-    btn.setAttribute('title', '双语字幕已关闭 (点击开启 · 点击右侧 ⚙ 打开字幕设置)');
+    btn.setAttribute('title', '翻译王 · 双语字幕 (已关闭 · 点击打开设置)');
+    btn.setAttribute('aria-label', '翻译王双语字幕 (已关闭 · 点击打开设置)');
+    logoWrap.style.filter = 'grayscale(1) opacity(0.45)';
   }
 
-  const icon = createTranslateIconSvg(12);
-  const label = document.createElement('span');
-  label.style.cssText = 'pointer-events: none !important;';
-  const getLangPrefix = (lang: TargetLanguage) => {
-    switch (lang) {
-      case 'ko': return '韩语';
-      case 'ja': return '日语';
-      case 'en': return '英语';
-      case 'zh-TW': return '繁体';
-      case 'fr': return '法语';
-      case 'de': return '德语';
-      case 'es': return '西语';
-      case 'ru': return '俄语';
-      case 'zh-CN':
-      default:
-        return '双语';
-    }
-  };
-  const prefix = getLangPrefix(currentTargetLang);
-  label.textContent = isSubtitlesEnabled
-    ? (currentTargetLang === 'zh-CN' ? '双语 ON' : `${prefix} ON`)
-    : (currentTargetLang === 'zh-CN' ? '双语 OFF' : `${prefix} OFF`);
-
-  // 分隔竖线 + 齿轮设置触发区
-  const gearTrigger = document.createElement('span');
-  gearTrigger.setAttribute('data-tk-role', 'settings-trigger');
-  gearTrigger.setAttribute('title', '打开双语字幕多维设置面板');
-  gearTrigger.style.cssText = `
-    display: inline-flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    margin-left: 2px !important;
-    padding-left: 4px !important;
-    border-left: 1px solid rgba(255, 255, 255, 0.32) !important;
-    font-size: 11px !important;
-    cursor: pointer !important;
-    pointer-events: auto !important;
-  `;
-  gearTrigger.textContent = '⚙';
-
-  pill.appendChild(icon);
-  pill.appendChild(label);
-  pill.appendChild(gearTrigger);
-  btn.appendChild(pill);
+  btn.appendChild(logoWrap);
 }
 
 /**
- * 切换双语字幕开关状态
+ * 切换双语字幕开关状态 (由字幕设置菜单总开关触发)
  */
 function toggleSubtitles(enabled?: boolean): void {
   isSubtitlesEnabled = enabled !== undefined ? enabled : !isSubtitlesEnabled;
@@ -512,7 +412,7 @@ function toggleSubtitles(enabled?: boolean): void {
   if (bottomBtn) updateButtonVisual(bottomBtn, true);
 
   if (isSubtitlesEnabled) {
-    showPlayerStatusToast('🌐 双语字幕：已开启 (点击 ⚙ 可调字号/颜色/位置)');
+    showPlayerStatusToast('🌐 双语字幕：已开启 (可在设置面板微调字号/颜色/位置)');
     if (!nativeObserver) {
       nativeObserver = new NativeCaptionObserver(currentTargetLang);
     }

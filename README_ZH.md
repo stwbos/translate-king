@@ -13,7 +13,7 @@
 
 [![Manifest V3](https://img.shields.io/badge/Manifest-MV3-blue?logo=google-chrome&logoColor=white)](https://developer.chrome.com/docs/extensions/mv3/intro/)
 [![License GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-green.svg)](LICENSE)
-[![Tests Passed](https://img.shields.io/badge/Tests-96%2F96%20Passed-brightgreen)](tests/)
+[![Tests Passed](https://img.shields.io/badge/Tests-141%2F141%20Passed-brightgreen)](tests/)
 [![Vite 5](https://img.shields.io/badge/Built%20With-Vite%205-purple?logo=vite&logoColor=white)](https://vitejs.dev/)
 [![TypeScript 5](https://img.shields.io/badge/Language-TypeScript%205-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 
@@ -23,4 +23,4 @@
 
 ---
 
-完整的架构说明、6 款双语译文主题、YouTube 视频整句双语字幕与全时长总结面板、三击空格输入翻译、全屏设置中心以及 20 个自动化测试套件（96 项用例）详情，请直接阅读主文档 **[README.md](README.md)**。
+完整的架构说明、6 款双语译文主题、全平台视频整句双语字幕与全时长总结面板（YouTube / Bilibili / 全网 HTML5 视频）、三击空格输入翻译、全屏设置中心以及 24 个自动化测试套件（141 项用例）详情，请直接阅读主文档 **[README.md](README.md)**。

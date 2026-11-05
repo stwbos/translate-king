@@ -138,7 +138,7 @@ chrome.runtime.onInstalled.addListener(() => {
         if (!tab.id) continue;
         const tabId = tab.id;
         chrome.scripting.insertCSS({ target: { tabId }, files: ['content.css'] }).catch(() => {});
-        if (tab.url?.includes('youtube.com')) {
+        if (tab.url?.includes('youtube.com') || tab.url?.includes('bilibili.com')) {
           chrome.scripting
             .executeScript({ target: { tabId }, files: ['yt-bridge.js'], world: 'MAIN' as any })
             .catch(() => {});

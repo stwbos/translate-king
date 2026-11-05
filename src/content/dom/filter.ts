@@ -80,7 +80,10 @@ const PLAYER_SUBTITLE_SELECTORS = [
   '.bili-subtitle-x-subtitle-panel',
   '.translate-king-bili-control-btn',
   '#translate-king-bili-subtitle-line',
-  '#translate-king-bili-toast'
+  '#translate-king-bili-summary-btn',
+  '#translate-king-bili-toast',
+  '#translate-king-universal-video-bar',
+  '#translate-king-universal-subtitle-line'
 ].join(',');
 
 /**

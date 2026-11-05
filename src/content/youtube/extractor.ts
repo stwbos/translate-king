@@ -345,7 +345,68 @@ export function parseXmlToCues(xmlText: string, isAsr = false): SubtitleCue[] {
 }
 
 /**
- * 统一字幕负载解析器 (自适应解析 json3、json 或 xml 格式字幕流)
+ * 解析 WebVTT (.vtt) 或 SubRip (.srt) 通用字幕文本为标准 SubtitleCue 列表
+ */
+export function parseVttOrSrtToCues(rawText: string): SubtitleCue[] {
+  const cues: SubtitleCue[] = [];
+  const blocks = rawText.replace(/\r\n/g, '\n').split(/\n\s*\n/);
+  let cueId = 1;
+
+  const parseTimeToken = (token: string): number => {
+    const clean = token.trim().replace(',', '.');
+    const parts = clean.split(':');
+    if (parts.length === 3) {
+      const h = parseFloat(parts[0]) || 0;
+      const m = parseFloat(parts[1]) || 0;
+      const s = parseFloat(parts[2]) || 0;
+      return Math.round((h * 3600 + m * 60 + s) * 1000);
+    }
+    if (parts.length === 2) {
+      const m = parseFloat(parts[0]) || 0;
+      const s = parseFloat(parts[1]) || 0;
+      return Math.round((m * 60 + s) * 1000);
+    }
+    return 0;
+  };
+
+  for (const block of blocks) {
+    const lines = block
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0 && !l.startsWith('WEBVTT') && !l.startsWith('NOTE'));
+    if (lines.length === 0) continue;
+
+    const arrowIdx = lines.findIndex((l) => l.includes('-->'));
+    if (arrowIdx === -1) continue;
+
+    const timeLine = lines[arrowIdx];
+    const timeMatch = timeLine.match(/([\d:.,]+)\s*-->\s*([\d:.,]+)/);
+    if (!timeMatch) continue;
+
+    const startMs = parseTimeToken(timeMatch[1]);
+    const endMs = Math.max(startMs + 500, parseTimeToken(timeMatch[2]));
+    const textContent = cleanRawText(
+      lines
+        .slice(arrowIdx + 1)
+        .join(' ')
+        .replace(/<[^>]+>/g, '')
+    );
+
+    if (textContent) {
+      cues.push({
+        id: cueId++,
+        startMs,
+        endMs,
+        originalText: textContent
+      });
+    }
+  }
+
+  return cues;
+}
+
+/**
+ * 统一字幕负载解析器 (自适应解析 json3、B站 subtitle json、xml、vtt 或 srt 格式字幕流)
  */
 export function parseSubtitlePayload(payload: string, isAsr = false): SubtitleCue[] {
   if (!payload || typeof payload !== 'string') return [];
@@ -355,6 +416,25 @@ export function parseSubtitlePayload(payload: string, isAsr = false): SubtitleCu
   if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
     try {
       const data = JSON.parse(trimmed);
+      // 兼容 B站官方字幕 JSON 结构: { body: [{ from: 0.5, to: 2.8, content: "..." }] }
+      if (Array.isArray(data.body)) {
+        let cueId = 1;
+        return data.body
+          .map((item: { from?: number; to?: number; content?: string; text?: string }) => {
+            const text = cleanRawText(String(item.content || item.text || ''));
+            if (!text) return null;
+            const startMs = Math.round(Number(item.from || 0) * 1000);
+            const endMs = Math.max(startMs + 500, Math.round(Number(item.to || (item.from || 0) + 3) * 1000));
+            return {
+              id: cueId++,
+              startMs,
+              endMs,
+              originalText: text
+            };
+          })
+          .filter((c: SubtitleCue | null): c is SubtitleCue => c !== null);
+      }
+
       const events = data.events || (Array.isArray(data) ? data : []);
       return parseJson3EventsToCues(events, isAsr);
     } catch (_) {}
@@ -362,6 +442,10 @@ export function parseSubtitlePayload(payload: string, isAsr = false): SubtitleCu
 
   if (trimmed.startsWith('<') || trimmed.includes('<text') || trimmed.includes('<p ')) {
     return parseXmlToCues(trimmed, isAsr);
+  }
+
+  if (trimmed.includes('-->')) {
+    return parseVttOrSrtToCues(trimmed);
   }
 
   return [];

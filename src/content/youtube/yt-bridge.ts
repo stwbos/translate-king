@@ -17,10 +17,69 @@
       const v = params.get('v');
       if (v) return v;
       const match = window.location.pathname.match(/\/(?:shorts|live|embed|v)\/([a-zA-Z0-9_-]+)/);
-      return match ? match[1] : null;
+      if (match) return match[1];
+      if (window.location.hostname.includes('bilibili.com')) {
+        const bvidMatch = window.location.pathname.match(/\/video\/(BV[a-zA-Z0-9]+|av\d+)/i);
+        const p = params.get('p') || '1';
+        return bvidMatch ? `${bvidMatch[1]}_p${p}` : null;
+      }
+      return null;
     } catch {
       return null;
     }
+  }
+
+  function isSubtitleNetworkUrl(url: string): boolean {
+    if (!url || typeof url !== 'string') return false;
+    return (
+      url.includes('/api/timedtext') ||
+      url.includes('aisubtitle.hdslb.com') ||
+      url.includes('/bfs/subtitle/') ||
+      url.includes('/bfs/ai_subtitle/')
+    );
+  }
+
+  function isBiliHoneyPotText(text: string): boolean {
+    return /亚历克斯|独自抚养孩子|我二十二岁.*抚养|大学教授有了外遇/.test(text);
+  }
+
+  function handleBiliWbiPlayerResponse(rawJsonText: string, currentVid: string | null): void {
+    try {
+      const parsed = JSON.parse(rawJsonText);
+      const subs = parsed?.data?.subtitle?.subtitles;
+      if (Array.isArray(subs) && subs.length > 0) {
+        const bestSub =
+          subs.find((s: any) => String(s?.lan || '').includes('zh')) || subs[0];
+        let subUrl = bestSub?.subtitle_url || '';
+        if (subUrl) {
+          if (subUrl.startsWith('//')) subUrl = `https:${subUrl}`;
+          else subUrl = subUrl.replace(/^http:\/\//i, 'https://');
+          const nativeFetch = originalFetch || window.fetch;
+          if (typeof nativeFetch === 'function') {
+            nativeFetch
+              .call(window, subUrl)
+              .then((r) => (r.ok ? r.text() : ''))
+              .then((subText) => {
+                if (subText && subText.includes('"body"') && !isBiliHoneyPotText(subText)) {
+                  const vid = currentVid || getUrlVideoId();
+                  const payload = { url: subUrl, body: subText, videoId: vid };
+                  win.__TK_LAST_TIMEDTEXT__ = payload;
+                  window.postMessage(
+                    {
+                      type: 'TK_YT_INTERCEPTED_TIMEDTEXT',
+                      url: subUrl,
+                      body: subText,
+                      videoId: vid
+                    },
+                    '*'
+                  );
+                }
+              })
+              .catch(() => {});
+          }
+        }
+      }
+    } catch (_) {}
   }
 
   function extractVideoIdFromTimedTextUrl(rawUrl: string): string | null {
@@ -111,6 +170,67 @@
     if (typeof performance === 'undefined' || typeof performance.getEntriesByType !== 'function') return;
     try {
       const entries = performance.getEntriesByType('resource') as PerformanceResourceTiming[];
+      const isBili = window.location.hostname.includes('bilibili.com');
+
+      if (isBili) {
+        // 1. 优先从 B站播放器已发出的真实 aisubtitle / bfs/subtitle 资源记录中直接恢复
+        for (let i = entries.length - 1; i >= 0; i--) {
+          const entryUrl = entries[i]?.name || '';
+          if (
+            entryUrl.includes('aisubtitle.hdslb.com') ||
+            entryUrl.includes('/bfs/subtitle/') ||
+            entryUrl.includes('/bfs/ai_subtitle/')
+          ) {
+            recoveringVid = currentVid;
+            const nativeFetch = originalFetch || window.fetch;
+            if (typeof nativeFetch === 'function') {
+              nativeFetch
+                .call(window, entryUrl)
+                .then((r) => (r.ok ? r.text() : ''))
+                .then((text) => {
+                  if (text && text.includes('"body"') && !isBiliHoneyPotText(text) && getUrlVideoId() === currentVid) {
+                    const payload = { url: entryUrl, body: text, videoId: currentVid };
+                    win.__TK_LAST_TIMEDTEXT__ = payload;
+                    window.postMessage(
+                      {
+                        type: 'TK_YT_INTERCEPTED_TIMEDTEXT',
+                        url: entryUrl,
+                        body: text,
+                        videoId: currentVid
+                      },
+                      '*'
+                    );
+                  }
+                })
+                .catch(() => {});
+            }
+            return;
+          }
+        }
+
+        // 2. 其次从 B站已带合法 w_rid 签名的 /x/player/wbi/v2 请求中恢复真实 subtitle_url
+        for (let i = entries.length - 1; i >= 0; i--) {
+          const entryUrl = entries[i]?.name || '';
+          if (entryUrl.includes('/x/player/wbi/v2') && entryUrl.includes('w_rid=')) {
+            recoveringVid = currentVid;
+            const nativeFetch = originalFetch || window.fetch;
+            if (typeof nativeFetch === 'function') {
+              nativeFetch
+                .call(window, entryUrl, { credentials: 'include' })
+                .then((r) => (r.ok ? r.text() : ''))
+                .then((jsonText) => {
+                  if (jsonText && getUrlVideoId() === currentVid) {
+                    handleBiliWbiPlayerResponse(jsonText, currentVid);
+                  }
+                })
+                .catch(() => {});
+            }
+            return;
+          }
+        }
+        return;
+      }
+
       for (let i = entries.length - 1; i >= 0; i--) {
         const entryUrl = entries[i]?.name || '';
         if (entryUrl.includes('/api/timedtext')) {
@@ -185,16 +305,31 @@
   }
   win.__TRANSLATE_KING_YT_BRIDGE_INITIALIZED__ = true;
 
-  // 1. 监听来自 Content Script 的主动索取请求
+  // 1. 监听来自 Content Script 的主动索取请求与播放跳转请求
   window.addEventListener('message', (e) => {
     if (!e.data) return;
     if (e.data.type === 'TK_REQUEST_YT_TRACKS') {
+      recoveringVid = null;
       broadcastTracks();
       replayCachedTimedText();
+    } else if (e.data.type === 'TK_SEEK_TO_SECONDS' && typeof e.data.seconds === 'number') {
+      const sec = Math.max(0, e.data.seconds);
+      try {
+        if (win.player && typeof win.player.seek === 'function') {
+          win.player.seek(sec);
+          if (typeof win.player.play === 'function') win.player.play();
+          return;
+        }
+        const ytPlayer = document.getElementById('movie_player') as any;
+        if (ytPlayer && typeof ytPlayer.seekTo === 'function') {
+          ytPlayer.seekTo(sec, true);
+          return;
+        }
+      } catch (_) {}
     }
   });
 
-  // 2. 被动拦截 XMLHttpRequest (零副作用读取播放器自身的 timedtext 响应)
+  // 2. 被动拦截 XMLHttpRequest (零副作用读取播放器自身的 timedtext / B站 aisubtitle 响应)
   const originalXhrOpen = XMLHttpRequest.prototype.open;
   const originalXhrSend = XMLHttpRequest.prototype.send;
 
@@ -205,12 +340,13 @@
 
   XMLHttpRequest.prototype.send = function (...args: any[]) {
     const url = (this as any).__tk_url || '';
-    if (typeof url === 'string' && url.includes('/api/timedtext')) {
+    if (typeof url === 'string' && isSubtitleNetworkUrl(url)) {
       window.postMessage({ type: 'TK_YT_NATIVE_TIMEDTEXT_URL', url }, '*');
 
       this.addEventListener('load', () => {
         try {
           if (this.status === 200 && this.responseText && this.responseText.trim().length > 0) {
+            if (isBiliHoneyPotText(this.responseText)) return;
             const finalUrl = this.responseURL || url;
             const urlVid = extractVideoIdFromTimedTextUrl(finalUrl) || getUrlVideoId();
             const currentVid = getUrlVideoId();
@@ -235,6 +371,14 @@
           }
         } catch (_) {}
       });
+    } else if (typeof url === 'string' && url.includes('/x/player/wbi/v2')) {
+      this.addEventListener('load', () => {
+        try {
+          if (this.status === 200 && this.responseText) {
+            handleBiliWbiPlayerResponse(this.responseText, getUrlVideoId());
+          }
+        } catch (_) {}
+      });
     }
     return originalXhrSend.apply(this, args as [any]);
   };
@@ -245,14 +389,14 @@
       const response = await originalFetch.apply(this, args as [RequestInfo, RequestInit?]);
       try {
         const url = typeof args[0] === 'string' ? args[0] : args[0]?.url || '';
-        if (typeof url === 'string' && url.includes('/api/timedtext')) {
+        if (typeof url === 'string' && isSubtitleNetworkUrl(url)) {
           window.postMessage({ type: 'TK_YT_NATIVE_TIMEDTEXT_URL', url }, '*');
 
           const clone = response.clone();
           clone
             .text()
             .then((text) => {
-              if (text && text.trim().length > 0) {
+              if (text && text.trim().length > 0 && !isBiliHoneyPotText(text)) {
                 const urlVid = extractVideoIdFromTimedTextUrl(url) || getUrlVideoId();
                 const currentVid = getUrlVideoId();
                 if (currentVid && urlVid && urlVid !== currentVid) {
@@ -270,6 +414,14 @@
                   '*'
                 );
               }
+            })
+            .catch(() => {});
+        } else if (typeof url === 'string' && url.includes('/x/player/wbi/v2')) {
+          const clone = response.clone();
+          clone
+            .text()
+            .then((text) => {
+              if (text) handleBiliWbiPlayerResponse(text, getUrlVideoId());
             })
             .catch(() => {});
         }
