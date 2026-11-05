@@ -25,6 +25,16 @@
   white-space: pre-line !important;
 }
 
+/* 悬停单段翻译防截断：解除标题/卡片的 line-clamp 与 overflow:hidden 裁剪，确保译文 100% 完整展示 */
+[data-tk-hover-unclip="true"] {
+  -webkit-line-clamp: unset !important;
+  line-clamp: unset !important;
+  max-height: none !important;
+  height: auto !important;
+  overflow: visible !important;
+  white-space: normal !important;
+}
+
 /* 纯译文替换模式下：对包含多行换行的评论/段落强制保留原始换行与空行排版 */
 [data-tk-multiline="true"] {
   white-space: pre-line !important;

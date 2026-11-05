@@ -15,7 +15,6 @@ let lastHoveredElement: HTMLElement | null = null;
 let lastMouseX = -1;
 let lastMouseY = -1;
 let hoverListenersInitialized = false;
-let lastCtrlMovedBlock: HTMLElement | null = null;
 
 export function setCtrlHoverTranslateEnabled(enabled: boolean): void {
   ctrlHoverEnabled = enabled;
@@ -26,12 +25,31 @@ export function isCtrlHoverTranslateEnabled(): boolean {
 }
 
 /**
- * 查找鼠标所在位置的最佳可翻译段落容器（支持 p/li/h1-h6 以及现代网页普遍使用的 div/span 文本块）
+ * 穿透开放 Shadow DOM 获取坐标点下最深层的真实 DOM 元素
+ */
+function deepElementFromPoint(x: number, y: number): HTMLElement | null {
+  if (typeof document === 'undefined' || typeof document.elementFromPoint !== 'function') return null;
+  let el = document.elementFromPoint(x, y) as HTMLElement | null;
+  let guard = 0;
+  while (el && el.shadowRoot && typeof el.shadowRoot.elementFromPoint === 'function' && guard < 8) {
+    const inner = el.shadowRoot.elementFromPoint(x, y) as HTMLElement | null;
+    if (!inner || inner === el) break;
+    el = inner;
+    guard++;
+  }
+  return el;
+}
+
+/**
+ * 查找鼠标所在位置的最佳可翻译段落容器（支持 p/li/h1-h6、Shadow DOM 评论以及现代网页普遍使用的 div/span/a 文本块）
  */
 export function findHoverParagraphElement(target: HTMLElement | null): HTMLElement | null {
-  if (!target || typeof target.closest !== 'function') return null;
+  if (!target) return null;
+  const startEl = target.nodeType === 3 ? target.parentElement : target;
+  if (!startEl || typeof startEl.closest !== 'function') return null;
+
   if (
-    target.closest(
+    startEl.closest(
       '#translate-king-floating-ball, #translate-king-bubble-host, #translate-king-yt-summary-panel, #translate-king-webpage-summary-panel, #translate-king-pdf-detector-banner, [data-tk-ignore]'
     )
   ) {
@@ -39,36 +57,71 @@ export function findHoverParagraphElement(target: HTMLElement | null): HTMLEleme
   }
 
   // 1. 若鼠标正好指在已翻译出来的译文块 (.translate-king-wrapper) 上，向上找到宿主段落以便还原
-  const wrapper = target.closest<HTMLElement>('.translate-king-wrapper');
+  const wrapper = startEl.closest<HTMLElement>('.translate-king-wrapper');
   if (wrapper && wrapper.parentElement) {
     return wrapper.parentElement;
   }
 
-  // 2. 若鼠标指在已标记过 data-tk-translated 的段落内，直接返回该段落
-  const translatedHost = target.closest<HTMLElement>('[data-tk-translated], [data-tk-hover-translated]');
+  // 2. 若鼠标指在已标记过 data-tk-translated / data-tk-hover-translated 的段落内，直接返回该段落
+  const translatedHost = startEl.closest<HTMLElement>('[data-tk-hover-translated], [data-tk-translated]');
   if (translatedHost) {
     return translatedHost;
   }
 
-  // 3. 优先匹配标准语义段落标签
-  const semantic = target.closest<HTMLElement>(
-    'p, li, blockquote, h1, h2, h3, h4, h5, h6, td, th, figcaption, dd, dt, summary, [data-testid="tweetText"], .update-components-text, .feed-shared-inline-show-more-text, .bili-rich-text-content, #content-text'
-  );
-  if (semantic && (semantic.textContent || '').trim().length >= 2) {
-    return semantic;
-  }
-
-  // 4. 兜底匹配现代网页常见的 div / span / a / section 独立文本块（向上寻找文本长度适中的叶子容器）
-  let curr: HTMLElement | null = target;
-  for (let depth = 0; depth < 5 && curr && curr !== document.body && curr !== document.documentElement; depth++) {
+  // 3. 自底向上逐层寻找最贴近鼠标的独立文本容器（优先匹配紧凑的标题/段落/链接/评论，避免直接跳到外层巨大的 <li> 卡片容器）
+  let curr: HTMLElement | null = startEl;
+  for (let depth = 0; depth < 6 && curr && curr !== document.body && curr !== document.documentElement; depth++) {
     const tag = curr.tagName;
-    if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT' || tag === 'BUTTON' || tag === 'INPUT' || tag === 'TEXTAREA') {
+    if (
+      tag === 'SCRIPT' ||
+      tag === 'STYLE' ||
+      tag === 'NOSCRIPT' ||
+      tag === 'INPUT' ||
+      tag === 'TEXTAREA' ||
+      tag === 'SELECT' ||
+      tag === 'SVG' ||
+      tag === 'PATH'
+    ) {
       return null;
     }
+
     const text = (curr.textContent || '').replace(/\s+/g, ' ').trim();
-    const blockChildren = curr.querySelectorAll('p, div, li, article, section, table').length;
-    if (text.length >= 2 && text.length <= 1600 && blockChildren <= 2) {
-      return curr;
+    if (text.length >= 2 && text.length <= 1600) {
+      // 检查是否是紧致的语义节点
+      const isSemanticTag = /^(P|H1|H2|H3|H4|H5|H6|BLOCKQUOTE|FIGCAPTION|DD|DT|SUMMARY|TD|TH)$/.test(tag);
+      const isKnownContentClass =
+        curr.id === 'contents' ||
+        curr.id === 'content-text' ||
+        curr.getAttribute('data-testid') === 'tweetText' ||
+        curr.classList.contains('bili-rich-text-content') ||
+        curr.classList.contains('bili-video-card__info--tit') ||
+        curr.classList.contains('desc-info-text');
+
+      if (isSemanticTag || isKnownContentClass) {
+        return curr;
+      }
+
+      // 对于 A / SPAN / DIV / LI：只有当它内部不包含多个独立大块级子容器时，才将其作为当前悬停段落
+      const blockChildrenCount = curr.querySelectorAll('p, div, li, article, section, table, h1, h2, h3, h4').length;
+      if (blockChildrenCount === 0) {
+        // 如果当前是纯内联短词 (如被拆碎的单个 <span> 词)，而父节点是字数合理的完整句子，则优先取父节点整句
+        const parent = curr.parentElement;
+        if (
+          (tag === 'SPAN' || tag === 'EM' || tag === 'STRONG' || tag === 'B' || tag === 'FONT') &&
+          parent &&
+          parent !== document.body
+        ) {
+          const parentText = (parent.textContent || '').replace(/\s+/g, ' ').trim();
+          const parentBlocks = parent.querySelectorAll('p, div, li, article, section, table').length;
+          if (parentText.length > text.length && parentText.length <= 1200 && parentBlocks <= 1) {
+            return parent;
+          }
+        }
+        return curr;
+      }
+      if (blockChildrenCount <= 2 && (tag === 'LI' || tag === 'DIV' || tag === 'A')) {
+        return curr;
+      }
     }
     curr = curr.parentElement;
   }
@@ -86,7 +139,7 @@ export async function toggleSingleParagraphTranslation(
 ): Promise<boolean> {
   if (!el) return false;
 
-  // 若该段落已处于翻译状态，再次触发则立即还原原文
+  // 若该段落已处于翻译状态，再次触发则立即还原原文并恢复原始裁剪样式
   if (
     el.hasAttribute('data-tk-translated') ||
     el.hasAttribute('data-tk-replaced') ||
@@ -95,6 +148,10 @@ export async function toggleSingleParagraphTranslation(
   ) {
     removeTranslation(el);
     el.removeAttribute('data-tk-hover-translated');
+    el.removeAttribute('data-tk-hover-unclip');
+    if (el.parentElement) {
+      el.parentElement.removeAttribute('data-tk-hover-unclip');
+    }
     return false;
   }
 
@@ -106,11 +163,23 @@ export async function toggleSingleParagraphTranslation(
   const rawText = (clone.textContent || '').replace(/\s+/g, ' ').trim();
   if (rawText.length < 2) return false;
 
-  // 智能双向互译：如果用户鼠标指着中文段落按 Ctrl，且目标语言是中文，则自动互译为英文 (en)，确保任何页面按 Ctrl 都有即时双语反馈！
-  const cjkCount = (rawText.match(/[\u4e00-\u9fa5]/g) || []).length;
-  const isMostlyChinese = cjkCount > rawText.length * 0.25;
-  const effectiveTargetLang: TargetLanguage =
-    isMostlyChinese && (targetLang === 'zh-CN' || targetLang === 'zh-TW') ? 'en' : targetLang;
+  // 智能双向互译：
+  // 1. 原文主要是外文（中文字数占比 < 35%）：若目标语言是 en 或未设置，强制翻译为简体中文 (zh-CN)，确保按 Ctrl 100% 翻成中文！
+  // 2. 原文主要是中文（中文字数占比 >= 35%）：若目标语言也是中文 (zh-CN / zh-TW)，自动互译为英文 (en)！
+  const cjkChars = (rawText.match(/[\u4e00-\u9fa5]/g) || []).length;
+  const nonSpaceLen = rawText.replace(/\s+/g, '').length || 1;
+  const isPredominantlyChinese = cjkChars / nonSpaceLen >= 0.35;
+
+  let effectiveTargetLang: TargetLanguage = targetLang || 'zh-CN';
+  if (isPredominantlyChinese) {
+    if (effectiveTargetLang === 'zh-CN' || effectiveTargetLang === 'zh-TW') {
+      effectiveTargetLang = 'en';
+    }
+  } else {
+    if (effectiveTargetLang === 'en') {
+      effectiveTargetLang = 'zh-CN';
+    }
+  }
 
   const block = {
     id: `tk-hover-${Date.now()}`,
@@ -119,15 +188,21 @@ export async function toggleSingleParagraphTranslation(
     tagName: el.tagName
   };
 
+  // 解除宿主元素及直接父元素的 line-clamp / overflow:hidden 限制，防止 B站视频标题、新闻卡片等把追加的双语译文裁掉看不见
+  el.setAttribute('data-tk-hover-unclip', 'true');
+  if (el.parentElement && el.parentElement !== document.body) {
+    el.parentElement.setAttribute('data-tk-hover-unclip', 'true');
+  }
+
   // 加上柔和的蓝色脉冲边框提示用户已命中该段落
   const prevOutline = el.style.outline;
   const prevTransition = el.style.transition;
   el.style.transition = 'outline 0.2s ease';
-  el.style.outline = '2px solid rgba(59, 130, 246, 0.65)';
+  el.style.outline = '2px solid rgba(59, 130, 246, 0.75)';
   setTimeout(() => {
     el.style.outline = prevOutline;
     el.style.transition = prevTransition;
-  }, 650);
+  }, 600);
 
   injectLoadingState(block, mode);
 
@@ -162,10 +237,8 @@ export async function toggleSingleParagraphTranslation(
 }
 
 /**
- * 初始化「按住 Ctrl 鼠标悬停单段即时翻译」监听器
- * 同时支持两种直觉操作：
- * 1. 鼠标停在任意段落上，单按一下 Ctrl 键 -> 翻译该段（再按一下 Ctrl 键 -> 还原原文）
- * 2. 按住 Ctrl 键不放，移动鼠标划过某一段落 -> 自动翻译所指段落
+ * 初始化「按 Ctrl 键鼠标悬停单段即时翻译」监听器
+ * 交互方式：鼠标停在任意中文或外文段落/标题上，按一下 Ctrl 键立即展开双语译文；再按一下 Ctrl 键立即还原！
  */
 export function initCtrlHoverParagraphTranslate(getTargetLang: () => TargetLanguage): void {
   if (typeof document === 'undefined' || hoverListenersInitialized) return;
@@ -184,66 +257,49 @@ export function initCtrlHoverParagraphTranslate(getTargetLang: () => TargetLangu
     });
   }
 
-  // 使用捕获阶段 (true) 监听鼠标位置，绝不被网页内部 stopPropagation 吞掉
-  document.addEventListener(
-    'mousemove',
-    (e: MouseEvent) => {
+  // 使用捕获阶段 + composedPath()[0] 穿透 Shadow DOM 实时跟踪鼠标下的真实最深层节点
+  const trackPointer = (e: MouseEvent) => {
+    lastMouseX = e.clientX;
+    lastMouseY = e.clientY;
+    const path = typeof e.composedPath === 'function' ? e.composedPath() : [];
+    const firstNode = path[0] as Node | undefined;
+    if (firstNode && firstNode.nodeType === 1) {
+      lastHoveredElement = firstNode as HTMLElement;
+    } else if (firstNode && firstNode.nodeType === 3 && firstNode.parentElement) {
+      lastHoveredElement = firstNode.parentElement;
+    } else {
       lastHoveredElement = e.target as HTMLElement | null;
-      lastMouseX = e.clientX;
-      lastMouseY = e.clientY;
+    }
+  };
 
-      // 模式 2：按住 Ctrl 移动鼠标悬停到段落上直接触发
-      if (ctrlHoverEnabled && e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {
-        const para = findHoverParagraphElement(lastHoveredElement);
-        if (para && para !== lastCtrlMovedBlock) {
-          lastCtrlMovedBlock = para;
-          toggleSingleParagraphTranslation(para, getTargetLang(), 'bilingual');
-        }
-      } else if (!e.ctrlKey) {
-        lastCtrlMovedBlock = null;
-      }
-    },
-    true
-  );
+  document.addEventListener('mousemove', trackPointer, true);
+  document.addEventListener('mouseover', trackPointer, true);
 
-  let ctrlPressedAlone = false;
   document.addEventListener(
     'keydown',
     (e: KeyboardEvent) => {
       if (!ctrlHoverEnabled) return;
-      if (e.key === 'Control' && !e.shiftKey && !e.altKey && !e.metaKey) {
-        ctrlPressedAlone = true;
-      } else {
-        ctrlPressedAlone = false;
+      // 仅响应单独按下 Control 键（忽略长按连发 e.repeat 以及组合键）
+      if (e.key !== 'Control' || e.repeat || e.shiftKey || e.altKey || e.metaKey) {
+        return;
       }
-    },
-    true
-  );
 
-  document.addEventListener(
-    'keyup',
-    (e: KeyboardEvent) => {
-      if (!ctrlHoverEnabled) return;
-      if (e.key === 'Control' && ctrlPressedAlone) {
-        ctrlPressedAlone = false;
-        // 如果刚才已经通过「按住 Ctrl 移动鼠标」触发过了当前块，松开 Ctrl 时不再重复冲抵还原
-        if (lastCtrlMovedBlock) {
-          lastCtrlMovedBlock = null;
-          return;
-        }
-        let targetEl = lastHoveredElement;
-        if (
-          (!targetEl || !targetEl.isConnected) &&
-          lastMouseX >= 0 &&
-          lastMouseY >= 0 &&
-          typeof document.elementFromPoint === 'function'
-        ) {
-          targetEl = document.elementFromPoint(lastMouseX, lastMouseY) as HTMLElement | null;
-        }
-        const para = findHoverParagraphElement(targetEl);
-        if (para) {
-          toggleSingleParagraphTranslation(para, getTargetLang(), 'bilingual');
-        }
+      // 如果当前处于输入框焦点中，不打断打字
+      const activeEl = document.activeElement as HTMLElement | null;
+      if (
+        activeEl &&
+        (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.isContentEditable)
+      ) {
+        return;
+      }
+
+      let targetEl = lastHoveredElement;
+      if ((!targetEl || !targetEl.isConnected) && lastMouseX >= 0 && lastMouseY >= 0) {
+        targetEl = deepElementFromPoint(lastMouseX, lastMouseY);
+      }
+      const para = findHoverParagraphElement(targetEl);
+      if (para) {
+        toggleSingleParagraphTranslation(para, getTargetLang(), 'bilingual');
       }
     },
     true
