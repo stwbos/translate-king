@@ -404,5 +404,14 @@ Let us explore deep learning architectures.`;
     expect(mountedPanel?.nextElementSibling?.id).toBe('danmukuBox');
     expect(mountedPanel?.previousElementSibling?.className).toBe('up-panel-container');
     expect(mountedPanel?.style.pointerEvents).toBe('auto');
+    expect(mountedPanel?.style.userSelect).toBe('text');
+
+    // 验证在视频总结面板内部划词释放鼠标 (mouseup) 时，事件能正常传递到 document 以触发划词翻译卡片
+    let docMouseUpReceived = false;
+    doc.addEventListener('mouseup', () => {
+      docMouseUpReceived = true;
+    });
+    mountedPanel?.dispatchEvent(new dom.window.MouseEvent('mouseup', { bubbles: true }));
+    expect(docMouseUpReceived).toBe(true);
   });
 });

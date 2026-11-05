@@ -41,14 +41,18 @@ export class SelectionFloatingCard {
       }
     }
 
-    // 鼠标点击网页其他区域自动隐藏浮窗
-    document.addEventListener('mousedown', (e) => {
-      if (this.host.style.display === 'none') return;
-      const target = e.target as Node;
-      if (!this.host.contains(target)) {
-        this.hide();
-      }
-    });
+    // 鼠标点击网页其他区域自动隐藏浮窗（捕获阶段监听，确保子容器 stopPropagation 时仍能正常收起旧弹窗）
+    document.addEventListener(
+      'mousedown',
+      (e) => {
+        if (this.host.style.display === 'none') return;
+        const target = e.target as Node;
+        if (!this.host.contains(target)) {
+          this.hide();
+        }
+      },
+      true
+    );
 
     // 按 Escape 键关闭
     document.addEventListener('keydown', (e) => {

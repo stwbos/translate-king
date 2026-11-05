@@ -989,13 +989,13 @@ export function triggerSelectionLookup(): void {
   const wordCount = word.split(/\s+/).length;
 
   if (hasChinese) {
-    // 中文选词：支持单字、成语至 50 字以内的短语短句
-    if (word.length > 50) {
+    // 中文选词：支持单字、成语至 300 字以内的短语、段落与视频总结条目
+    if (word.length > 300) {
       return;
     }
   } else {
-    // 字母/外文选词：支持生词、复合词组、聊天短句 (1 ~ 25 词且 <= 150 字符)
-    if (wordCount > 25 || word.length > 150 || !/[\p{L}\p{N}]/u.test(word)) {
+    // 字母/外文选词：支持生词、复合词组、聊天短句与视频总结句子 (1 ~ 60 词且 <= 400 字符)
+    if (wordCount > 60 || word.length > 400 || !/[\p{L}\p{N}]/u.test(word)) {
       return;
     }
   }
@@ -1055,21 +1055,29 @@ export function triggerSelectionLookup(): void {
   }
 }
 
-// 监听 mouseup 事件：延时 40ms 确保浏览器选区与双击动作完全稳定
-document.addEventListener('mouseup', (e) => {
-  const host = document.getElementById('translate-king-bubble-host');
-  if (host && host.contains(e.target as Node)) {
-    return;
-  }
-  setTimeout(triggerSelectionLookup, 40);
-});
-
-// 监听 keyup 事件：支持 Shift + 方向键键盘划词
-document.addEventListener('keyup', (e) => {
-  if (e.key === 'Shift' || e.key.startsWith('Arrow')) {
+// 监听捕获阶段 mouseup 事件：延时 40ms 确保浏览器选区与双击动作完全稳定，且不受任何子组件 stopPropagation 阻断
+document.addEventListener(
+  'mouseup',
+  (e) => {
+    const host = document.getElementById('translate-king-bubble-host');
+    if (host && host.contains(e.target as Node)) {
+      return;
+    }
     setTimeout(triggerSelectionLookup, 40);
-  }
-});
+  },
+  true
+);
+
+// 监听捕获阶段 keyup 事件：支持 Shift + 方向键键盘划词
+document.addEventListener(
+  'keyup',
+  (e) => {
+    if (e.key === 'Shift' || e.key.startsWith('Arrow')) {
+      setTimeout(triggerSelectionLookup, 40);
+    }
+  },
+  true
+);
 
 // 监听来自扩展 Popup / Background 的指令
 chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResponse) => {

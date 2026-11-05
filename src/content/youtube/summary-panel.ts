@@ -577,13 +577,17 @@ export class YouTubeSummaryPanel {
       box-sizing: border-box !important;
       z-index: 2147483640 !important;
       pointer-events: auto !important;
+      user-select: text !important;
+      -webkit-user-select: text !important;
     `;
 
-    // 阻止宿主页面（如 B站右栏或通用播放器外层）吞噬点击与滚轮事件，保证总结面板 100% 可交互
-    panel.addEventListener('click', (e) => e.stopPropagation());
-    panel.addEventListener('mousedown', (e) => e.stopPropagation());
-    panel.addEventListener('mouseup', (e) => e.stopPropagation());
-    panel.addEventListener('dblclick', (e) => e.stopPropagation());
+    // 仅在无文本选区时阻止点击与滚轮穿透至宿主侧栏，完整保留 mousedown/mouseup/dblclick 划词选词翻译！
+    panel.addEventListener('click', (e) => {
+      const sel = typeof window !== 'undefined' && window.getSelection ? window.getSelection()?.toString().trim() : '';
+      if (!sel) {
+        e.stopPropagation();
+      }
+    });
     panel.addEventListener('wheel', (e) => e.stopPropagation(), { passive: true });
 
     const isBili = typeof window !== 'undefined' && (window.location.hostname || '').includes('bilibili.com');
@@ -1407,7 +1411,7 @@ export class YouTubeSummaryPanel {
     tabBar.appendChild(createTabBtn('transcript', `📜 完整双语文字稿 (${this.transcriptParagraphs.length}段)`));
     this.panelEl.appendChild(tabBar);
 
-    // 3. 内容滚动区
+    // 3. 内容滚动区（显式允许文本自由划选）
     const body = document.createElement('div');
     this.bodyEl = body;
     body.style.cssText = `
@@ -1419,6 +1423,9 @@ export class YouTubeSummaryPanel {
       gap: 10px !important;
       font-size: 13px !important;
       line-height: 1.55 !important;
+      user-select: text !important;
+      -webkit-user-select: text !important;
+      cursor: text !important;
     `;
 
     if (this.isLoading) {
