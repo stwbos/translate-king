@@ -649,6 +649,13 @@ export function extractTranslatableBlocks(
     }
 
     // ---------------------------------------------------------
+    // 阶段 1.5：通用混合容器行内文本流聚合成段 (Universal Mixed-Container Inline-Run Grouping)
+    // 解决 <li>父项文本 <ul><li>子项</li></ul></li> 或 <div class="card">句首 <span>句中</span> <a href="#">链接</a><div class="meta">底部</div></div>
+    // 中裸 TextNode 丢失或行内 span/a 被拆碎成多个独立译文框的通用排版难题
+    // ---------------------------------------------------------
+    groupMixedContainerInlineRuns(currentRoot, processedElements, targetLang);
+
+    // ---------------------------------------------------------
     // 阶段 2：通用叶子文本容器兜底扫描 (实现 Google 翻译的全面覆盖)
     // 捕获所有不在原子选择器中的简介、趋势话题、人名、社交说明、标签页
     // ---------------------------------------------------------
@@ -663,6 +670,16 @@ export function extractTranslatableBlocks(
       if (isElementEffectivelyTranslated(el)) continue;
       if (shouldIgnoreElement(el)) continue;
 
+      // 若 el 位于已聚合的 [data-tk-inline-group="true"] 内部（但不是该聚合容器自身），跳过，统一由聚合容器按整句提取
+      if (
+        !el.hasAttribute('data-tk-inline-group') &&
+        el.parentElement &&
+        typeof el.parentElement.closest === 'function' &&
+        el.parentElement.closest('[data-tk-inline-group="true"]')
+      ) {
+        continue;
+      }
+
       // 若 el 内部包含其他块级容器或已标记/翻译的子块，则说明它是外层布局容器，绝不能整体提取
       // 通用规则：忽略子级中的 button（按钮在克隆提取时会自动剥离），仅当存在真正的子段落块级容器时才视为复合外层容器
       const childBlocks = typeof el.querySelectorAll === 'function' ? Array.from(el.querySelectorAll(CHILD_BLOCK_SELECTOR)) : [];
@@ -675,7 +692,7 @@ export function extractTranslatableBlocks(
         continue;
       }
 
-      // 若 el 是 span 或 a，且其直接父级 div/li 也是叶子容器，则跳过子级，让父级整体提取整句
+      // 若 el 是 span 或 a（且不是行内聚合段容器），并且其直接父级 div/li 也是叶子容器，则跳过子级，让父级整体提取整句
       const parentHasRealChildBlocks =
         el.parentElement && typeof el.parentElement.querySelectorAll === 'function'
           ? Array.from(el.parentElement.querySelectorAll(CHILD_BLOCK_SELECTOR)).some(
@@ -684,6 +701,7 @@ export function extractTranslatableBlocks(
           : false;
       if (
         (el.tagName === 'SPAN' || el.tagName === 'A') &&
+        !el.hasAttribute('data-tk-inline-group') &&
         el.parentElement &&
         typeof el.parentElement.querySelector === 'function' &&
         !parentHasRealChildBlocks &&
@@ -712,6 +730,191 @@ export function extractTranslatableBlocks(
   }
 
   return blocks;
+}
+
+const INLINE_RUN_TAGS = new Set([
+  'SPAN',
+  'A',
+  'B',
+  'STRONG',
+  'EM',
+  'I',
+  'CODE',
+  'SUP',
+  'SUB',
+  'SMALL',
+  'MARK',
+  'FONT',
+  'LABEL',
+  'ABBR',
+  'TIME',
+  'KBD',
+  'SAMP',
+  'VAR',
+  'Q',
+  'CITE',
+  'DFN',
+  'DEL',
+  'INS',
+  'S',
+  'U',
+  'BR'
+]);
+
+/**
+ * 通用混合容器行内文本流聚合成段：
+ * 当一个块级容器 (div, li, td, th, dd, dt, section, article, blockquote) 同时包含子块级容器（如嵌套的 <ul>、<div>）
+ * 与直接子级行内节点（裸 TextNode 或连续的 <span>/<a>/<b>）时，将该连续行内节点流包裹为 <span data-tk-inline-group="true">，
+ * 从而保证：
+ * 1. 混合容器中的裸 TextNode 绝不会因为父容器被跳过而漏翻；
+ * 2. 同一句话中的多个行内标签（如 "Sentence start <span>middle</span> and <a href='#'>link</a>."）作为完整单句提取，绝不被拆成多个垂直译文框。
+ */
+function groupMixedContainerInlineRuns(
+  root: ParentNode,
+  processedElements: Set<HTMLElement>,
+  targetLang?: string
+): void {
+  if (typeof root.querySelectorAll !== 'function') return;
+  let containers: HTMLElement[] = [];
+  try {
+    containers = Array.from(
+      root.querySelectorAll<HTMLElement>('div, li, td, th, dd, dt, section, article, blockquote')
+    );
+  } catch {
+    return;
+  }
+
+  for (const container of containers) {
+    if (processedElements.has(container)) continue;
+    if (isElementEffectivelyTranslated(container)) continue;
+    if (shouldIgnoreElement(container)) continue;
+    if (
+      typeof container.closest === 'function' &&
+      container.closest(
+        '[data-tk-id], [data-tk-translated], [data-tk-replaced], [data-tk-inline-group="true"], button, a, .translate-king-wrapper'
+      )
+    ) {
+      continue;
+    }
+
+    // 仅当 container 内部存在真正的子块级元素或已提取的子元素（导致 container 自身无法在阶段 2 作为纯叶子整体提取）时，才聚合其直接子级行内流
+    const childBlocks =
+      typeof container.querySelectorAll === 'function'
+        ? Array.from(container.querySelectorAll(CHILD_BLOCK_SELECTOR))
+        : [];
+    const hasRealChildBlocks = childBlocks.some(
+      (child) => child.tagName !== 'BUTTON' && !isExpandToggleButton(child)
+    );
+    const hasProcessedSubtree =
+      typeof container.querySelector === 'function' &&
+      container.querySelector('[data-tk-id], .translate-king-wrapper, [data-tk-replaced]') !== null;
+
+    if (!hasRealChildBlocks && !hasProcessedSubtree) {
+      continue;
+    }
+
+    const doc = container.ownerDocument || (typeof document !== 'undefined' ? document : null);
+    if (!doc || typeof doc.createElement !== 'function') continue;
+
+    const children = Array.from(container.childNodes);
+    let currentRun: Node[] = [];
+
+    const flushRun = () => {
+      if (currentRun.length === 0) return;
+
+      // 剥离首尾纯空白文本节点或首尾孤立 <br>
+      while (
+        currentRun.length > 0 &&
+        ((currentRun[0].nodeType === 3 && !(currentRun[0].nodeValue || '').trim()) ||
+          (currentRun[0].nodeType === 1 && (currentRun[0] as HTMLElement).tagName === 'BR'))
+      ) {
+        currentRun.shift();
+      }
+      while (
+        currentRun.length > 0 &&
+        ((currentRun[currentRun.length - 1].nodeType === 3 &&
+          !(currentRun[currentRun.length - 1].nodeValue || '').trim()) ||
+          (currentRun[currentRun.length - 1].nodeType === 1 &&
+            (currentRun[currentRun.length - 1] as HTMLElement).tagName === 'BR'))
+      ) {
+        currentRun.pop();
+      }
+
+      if (currentRun.length === 0) return;
+
+      const hasNonEmptyTextNode = currentRun.some(
+        (n) => n.nodeType === 3 && /\p{L}/u.test(n.nodeValue || '')
+      );
+      const elementNodes = currentRun.filter((n): n is HTMLElement => n.nodeType === 1);
+      const hasOrphanFormattingTag = elementNodes.some(
+        (el) => el.tagName !== 'SPAN' && el.tagName !== 'A' && el.tagName !== 'BR'
+      );
+      const hasConnectedInlineElements =
+        elementNodes.length >= 2 &&
+        !elementNodes.every((el) => el.tagName === 'A') &&
+        elementNodes.some((el) => {
+          const raw = el.textContent || '';
+          return /^\s|\s$/.test(raw) || /[,;:—–-]$/.test(raw.trim());
+        });
+
+      if (hasNonEmptyTextNode || hasOrphanFormattingTag || hasConnectedInlineElements) {
+        const combinedText = currentRun
+          .map((n) => n.textContent || '')
+          .join(' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+
+        if (
+          isValidTranslatableText(combinedText) &&
+          !isAlreadyInTargetLanguage(combinedText, targetLang)
+        ) {
+          const groupSpan = doc.createElement('span');
+          groupSpan.setAttribute('data-tk-inline-group', 'true');
+          const firstNode = currentRun[0];
+          if (firstNode.parentNode === container) {
+            container.insertBefore(groupSpan, firstNode);
+            for (const node of currentRun) {
+              groupSpan.appendChild(node);
+            }
+          }
+        }
+      }
+
+      currentRun = [];
+    };
+
+    for (const node of children) {
+      if (node.nodeType === 3) {
+        currentRun.push(node);
+      } else if (node.nodeType === 1) {
+        const el = node as HTMLElement;
+        const role = el.getAttribute?.('role') || '';
+        const isInlineCandidate =
+          INLINE_RUN_TAGS.has(el.tagName) &&
+          !el.hasAttribute('data-tk-inline-group') &&
+          !processedElements.has(el) &&
+          !el.hasAttribute('data-tk-id') &&
+          !isElementEffectivelyTranslated(el) &&
+          !shouldIgnoreElement(el) &&
+          role !== 'button' &&
+          role !== 'heading' &&
+          role !== 'tab' &&
+          !(el.tagName === 'A' && (el.classList?.contains('btn') || el.classList?.contains('button'))) &&
+          (!el.querySelector ||
+            (!el.querySelector(CHILD_BLOCK_SELECTOR) &&
+              !el.querySelector('[data-tk-id], .translate-king-wrapper, [data-tk-replaced]')));
+
+        if (isInlineCandidate) {
+          currentRun.push(el);
+        } else {
+          flushRun();
+        }
+      } else {
+        flushRun();
+      }
+    }
+    flushRun();
+  }
 }
 
 /**

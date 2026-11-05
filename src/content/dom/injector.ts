@@ -558,7 +558,19 @@ export function clearAllTranslations(root: ParentNode = document): void {
       node.removeAttribute('data-tk-hover-unclip');
     });
 
-    // 4. 清理 shadow style
+    // 4. 无损拆包混合容器行内聚合段，100% 恢复原始 DOM 子节点层级
+    const allInlineGroups = r.querySelectorAll('[data-tk-inline-group="true"]');
+    allInlineGroups.forEach((group) => {
+      const parent = group.parentNode;
+      if (parent) {
+        while (group.firstChild) {
+          parent.insertBefore(group.firstChild, group);
+        }
+        group.remove();
+      }
+    });
+
+    // 5. 清理 shadow style
     if ((r as any).host && typeof (r as any).getElementById === 'function') {
       (r as ShadowRoot).getElementById('translate-king-shadow-styles')?.remove();
     }

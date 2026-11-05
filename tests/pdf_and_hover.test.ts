@@ -16,6 +16,8 @@ import {
   toggleWebpageSummaryPanel
 } from '../src/content/hover-translate';
 import { setupFloatingBall, removeFloatingBall } from '../src/content/floating-ball';
+import { extractTranslatableBlocks } from '../src/content/dom/extractor';
+import { injectTranslation, clearAllTranslations } from '../src/content/dom/injector';
 
 describe('PDFMathTranslate Protocol & Dual-Mode Layout Parser', () => {
   it('identifies math fonts (CMMI, CMSY, Math) and symbolic tokens accurately', () => {
@@ -258,5 +260,79 @@ describe('Ctrl Hover Single-Paragraph Translation & Online PDF / Webpage Summary
     expect(shadow?.querySelector('[data-tk-action="pdf-studio"]')).not.toBeNull();
     expect(shadow?.textContent).toContain('鼠标悬停单段译');
     expect(shadow?.textContent).toContain('Ctrl');
+  });
+
+  it('universally extracts mixed-content containers, nested lists, and paragraphs with inline buttons without dropping text or fragmenting sentences', () => {
+    const root = document.createElement('div');
+
+    // 1. Nested list where outer <li> has direct text AND a child <ul>
+    const ulOuter = document.createElement('ul');
+    const liOuter = document.createElement('li');
+    liOuter.appendChild(document.createTextNode('Parent list item text before sublist'));
+    const ulInner = document.createElement('ul');
+    const liInner = document.createElement('li');
+    liInner.textContent = 'Nested child list item text';
+    ulInner.appendChild(liInner);
+    liOuter.appendChild(ulInner);
+    ulOuter.appendChild(liOuter);
+    root.appendChild(ulOuter);
+
+    // 2. Mixed-content card where direct text + <span> + <a> precede a child <div class="footer">
+    const card = document.createElement('div');
+    card.appendChild(document.createTextNode('Sentence start '));
+    const midSpan = document.createElement('span');
+    midSpan.textContent = 'middle phrase';
+    card.appendChild(midSpan);
+    card.appendChild(document.createTextNode(' and '));
+    const link = document.createElement('a');
+    link.href = 'https://example.com';
+    link.textContent = 'important link';
+    card.appendChild(link);
+    card.appendChild(document.createTextNode('.'));
+    const footer = document.createElement('div');
+    footer.textContent = 'Card footer metadata summary';
+    card.appendChild(footer);
+    root.appendChild(card);
+
+    // 3. Paragraph containing an inline action <button>, plus a standalone <button>
+    const pWithBtn = document.createElement('p');
+    pWithBtn.appendChild(document.createTextNode('Architecture overview for distributed training '));
+    const inlineBtn = document.createElement('button');
+    inlineBtn.textContent = 'Copy citation';
+    pWithBtn.appendChild(inlineBtn);
+    root.appendChild(pWithBtn);
+
+    const standaloneBtn = document.createElement('button');
+    standaloneBtn.textContent = 'Load more papers';
+    root.appendChild(standaloneBtn);
+
+    document.body.appendChild(root);
+
+    const blocks = extractTranslatableBlocks(root, 'zh-CN');
+    const texts = blocks.map((b) => b.originalText);
+
+    // Parent list item text and nested list item text must BOTH be extracted
+    expect(texts).toContain('Parent list item text before sublist');
+    expect(texts).toContain('Nested child list item text');
+
+    // Mixed card inline run must be unified into a single sentence block with <x0> placeholder for the link
+    expect(texts).toContain('Sentence start middle phrase and <x0>important link</x0>.');
+    expect(texts).toContain('Card footer metadata summary');
+
+    // Paragraph with inline button must be extracted cleanly without button text mixed in, and standalone button extracted in Stage 3
+    expect(texts).toContain('Architecture overview for distributed training');
+    expect(texts).not.toContain('Architecture overview for distributed training Copy citation');
+    expect(texts).toContain('Load more papers');
+
+    // Inject translations and verify lossless restoration via clearAllTranslations
+    for (const block of blocks) {
+      injectTranslation(block, `[译] ${block.originalText}`, 'bilingual');
+    }
+    expect(root.querySelectorAll('[data-tk-inline-group="true"]').length).toBe(2);
+
+    clearAllTranslations(root);
+    expect(root.querySelectorAll('[data-tk-inline-group="true"]').length).toBe(0);
+    expect(root.querySelectorAll('.translate-king-wrapper').length).toBe(0);
+    expect(card.textContent).toContain('Sentence start middle phrase and important link.');
   });
 });
