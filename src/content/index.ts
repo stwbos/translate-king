@@ -535,11 +535,10 @@ function startDynamicObserver(): void {
             }
           }
 
-          // 社交平台私信/聊天与动态流卡片高优判定 (X / Twitter + LinkedIn)
+          // 社交平台私信/聊天高优判定 (X / Twitter + LinkedIn Messaging，仅针对聊天窗口开启 10ms 极速防抖，避免主信息流高频虚拟滚动过载)
           if (
             el.getAttribute?.('data-testid') === 'messageEntry' ||
             el.getAttribute?.('data-testid') === 'conversation' ||
-            el.getAttribute?.('data-testid') === 'cellInnerDiv' ||
             el.getAttribute?.('data-testid') === 'DMConversation' ||
             el.getAttribute?.('data-testid') === 'DMChatTranscript' ||
             el.classList?.contains('msg-s-event-listitem') ||
@@ -550,11 +549,9 @@ function startDynamicObserver(): void {
             el.classList?.contains('msg-s-message-list-container') ||
             el.classList?.contains('msg-conversation-card') ||
             el.classList?.contains('msg-conversation-listitem') ||
-            el.classList?.contains('feed-shared-update-v2') ||
-            el.classList?.contains('occludable-update') ||
             (typeof el.querySelector === 'function' &&
               el.querySelector(
-                '[data-testid="messageEntry"], [data-testid="conversation"], [data-testid="cellInnerDiv"], [data-testid="DMConversation"], .msg-s-event-listitem, .msg-s-message-list__event, .msg-thread, .msg-overlay-conversation-bubble, .feed-shared-update-v2, .occludable-update'
+                '[data-testid="messageEntry"], [data-testid="conversation"], [data-testid="DMConversation"], .msg-s-event-listitem, .msg-s-message-list__event, .msg-thread, .msg-overlay-conversation-bubble'
               ))
           ) {
             isHighPriorityChat = true;

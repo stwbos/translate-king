@@ -376,9 +376,16 @@ export function injectTranslation(
       el.setAttribute('data-tk-multiline', 'true');
     }
 
-    // 核心分支 A：若当前块包含行内超链接/加粗/引用等子元素，采用 DOM 片段重构机制
-    // 彻底解决段落翻译时 <a> 超链接被掏空、[1] 引用变成纯文本的重大缺陷！
-    if (block.inlineElements && block.inlineElements.length > 0 && doc) {
+    // 核心分支 A：若当前块包含行内超链接/加粗/引用等子元素，且不在 React/Ember 虚拟列表（如 LinkedIn .ember-view / .occludable-update）内，采用 DOM 片段重构机制
+    // 若位于 LinkedIn / Twitter 等 Virtual DOM 动态流内，绝不执行 removeChild 销毁原节点，统一走分支 B 原位修改 TextNode.nodeValue，杜绝 removeChild 崩溃
+    const isVirtualDomManaged =
+      typeof el.closest === 'function' &&
+      Boolean(
+        el.closest(
+          '.ember-view, .feed-shared-update-v2, .occludable-update, [data-view-name*="update"], [data-id*="urn:li:activity"], [data-urn*="activity"], [data-testid="tweetText"], [data-testid="cellInnerDiv"]'
+        )
+      );
+    if (block.inlineElements && block.inlineElements.length > 0 && doc && !isVirtualDomManaged) {
       if (!savedOriginalNodesMap.has(el)) {
         savedOriginalNodesMap.set(
           el,
@@ -422,7 +429,8 @@ export function injectTranslation(
       return;
     }
 
-    // 核心分支 B：普通文本块（无子行内元素）
+    // 核心分支 B：普通文本块或 Virtual DOM 托管块（原位修改 TextNode.nodeValue，绝不销毁 DOM 节点引用）
+    const cleanTranslatedText = translatedText.replace(/<\/?x\d+[^>]*>/gi, '');
     if (typeof el.querySelectorAll === 'function') {
       el.querySelectorAll('br').forEach((br) => br.setAttribute('data-tk-hidden-br', 'true'));
     }
@@ -434,7 +442,7 @@ export function injectTranslation(
       if (!el.hasAttribute('data-tk-orig-text')) {
         el.setAttribute('data-tk-orig-text', primaryTextNode.nodeValue || block.originalText);
       }
-      primaryTextNode.nodeValue = translatedText;
+      primaryTextNode.nodeValue = cleanTranslatedText;
 
       // 如果当前元素包含多个子文本节点（例如多行评论、Twitter 多 span 拼接的 Bio / 简介）：
       // 将后续的子文本节点清空为 ''，彻底杜绝多 span 拼接残留英文或尾部多余空行！
@@ -450,10 +458,10 @@ export function injectTranslation(
       if (!el.hasAttribute('data-tk-orig-text')) {
         el.setAttribute('data-tk-orig-text', block.originalText);
       }
-      el.textContent = translatedText;
+      el.textContent = cleanTranslatedText;
     }
 
-    el.setAttribute('data-tk-trans-text', translatedText);
+    el.setAttribute('data-tk-trans-text', cleanTranslatedText);
 
     // 同步翻译 aria-label（适配 Twitter 紧凑模式图标提示）
     if (el.hasAttribute('aria-label')) {
@@ -462,7 +470,7 @@ export function injectTranslation(
         if (!el.hasAttribute('data-tk-orig-aria')) {
           el.setAttribute('data-tk-orig-aria', origAria);
         }
-        el.setAttribute('aria-label', translatedText);
+        el.setAttribute('aria-label', cleanTranslatedText);
       }
     }
 
@@ -476,19 +484,28 @@ export function injectTranslation(
   // 对于操作按钮，在双语模式下直接原地替换文本（避免在小按钮内塞入双行导致界面错位）
   // 核心保护：严禁使用 el.textContent 暴力抹除内部 DOM，必须定位文本节点安全更新，完整保留 SVG 图标与 React 事件绑定
   if (isInteractiveButton(el)) {
-    if (!el.hasAttribute('data-tk-orig-text')) {
-      el.setAttribute('data-tk-orig-text', block.originalText);
-    }
+    const cleanBtnText = translatedText.replace(/<\/?x\d+[^>]*>/gi, '');
     const textNodes = doc ? collectManagedTextNodes(el, doc) : [];
     if (textNodes.length > 0) {
-      textNodes[0].nodeValue = translatedText;
-      for (let i = 1; i < textNodes.length; i++) {
-        textNodes[i].nodeValue = '';
+      if (!el.hasAttribute('data-tk-orig-text')) {
+        el.setAttribute('data-tk-orig-text', textNodes[0].nodeValue || block.originalText);
+      }
+      textNodes[0].nodeValue = cleanBtnText;
+      if (textNodes.length > 1 && !el.hasAttribute('data-tk-extra-text')) {
+        const extraData: string[] = [];
+        for (let i = 1; i < textNodes.length; i++) {
+          extraData.push(textNodes[i].nodeValue || '');
+          textNodes[i].nodeValue = '';
+        }
+        el.setAttribute('data-tk-extra-text', JSON.stringify(extraData));
       }
     } else {
-      el.textContent = translatedText;
+      if (!el.hasAttribute('data-tk-orig-text')) {
+        el.setAttribute('data-tk-orig-text', block.originalText);
+      }
+      el.textContent = cleanBtnText;
     }
-    el.setAttribute('data-tk-trans-text', translatedText);
+    el.setAttribute('data-tk-trans-text', cleanBtnText);
     el.setAttribute('data-tk-replaced', 'true');
     return;
   }
@@ -516,15 +533,6 @@ export function injectTranslation(
 
   wrapper.appendChild(textNode);
   block.element.setAttribute('data-tk-translated', 'true');
-  block.element.setAttribute('data-tk-hover-unclip', 'true');
-  if (
-    block.element.parentElement &&
-    block.element.parentElement.tagName !== 'BODY' &&
-    block.element.parentElement.tagName !== 'MAIN' &&
-    block.element.parentElement.tagName !== 'ARTICLE'
-  ) {
-    block.element.parentElement.setAttribute('data-tk-hover-unclip', 'true');
-  }
   block.element.appendChild(wrapper);
 
   const rootNode = typeof block.element.getRootNode === 'function' ? block.element.getRootNode() : null;

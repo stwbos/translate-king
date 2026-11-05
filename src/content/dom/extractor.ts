@@ -649,15 +649,9 @@ export function extractTranslatableBlocks(
     }
 
     // ---------------------------------------------------------
-    // 阶段 1.5：通用混合容器行内文本流聚合成段 (Universal Mixed-Container Inline-Run Grouping)
-    // 解决 <li>父项文本 <ul><li>子项</li></ul></li> 或 <div class="card">句首 <span>句中</span> <a href="#">链接</a><div class="meta">底部</div></div>
-    // 中裸 TextNode 丢失或行内 span/a 被拆碎成多个独立译文框的通用排版难题
-    // ---------------------------------------------------------
-    groupMixedContainerInlineRuns(currentRoot, processedElements, targetLang);
-
-    // ---------------------------------------------------------
     // 阶段 2：通用叶子文本容器兜底扫描 (实现 Google 翻译的全面覆盖)
     // 捕获所有不在原子选择器中的简介、趋势话题、人名、社交说明、标签页
+    // 严禁在此阶段动态移动或包裹宿主页 DOM 节点，防止破坏 React / Ember (LinkedIn) Virtual DOM 树导致重渲染死循环与 removeChild 崩溃
     // ---------------------------------------------------------
     const candidateLeafs = Array.from(
       currentRoot.querySelectorAll<HTMLElement>(
@@ -670,41 +664,28 @@ export function extractTranslatableBlocks(
       if (isElementEffectivelyTranslated(el)) continue;
       if (shouldIgnoreElement(el)) continue;
 
-      // 若 el 位于已聚合的 [data-tk-inline-group="true"] 内部（但不是该聚合容器自身），跳过，统一由聚合容器按整句提取
-      if (
-        !el.hasAttribute('data-tk-inline-group') &&
-        el.parentElement &&
-        typeof el.parentElement.closest === 'function' &&
-        el.parentElement.closest('[data-tk-inline-group="true"]')
-      ) {
-        continue;
-      }
-
       // 若 el 内部包含其他块级容器或已标记/翻译的子块，则说明它是外层布局容器，绝不能整体提取
-      // 通用规则：忽略子级中的 button（按钮在克隆提取时会自动剥离），仅当存在真正的子段落块级容器时才视为复合外层容器
+      // 但若内部唯一的子块仅仅是 "...更多 / see more" 展开按钮，则不视为外层布局容器，允许正常提取整段！
       const childBlocks = typeof el.querySelectorAll === 'function' ? Array.from(el.querySelectorAll(CHILD_BLOCK_SELECTOR)) : [];
-      const hasRealChildBlocks = childBlocks.some((child) => child.tagName !== 'BUTTON' && !isExpandToggleButton(child));
+      const hasNonToggleChildBlock = childBlocks.some((child) => !isExpandToggleButton(child));
       if (
         (typeof el.querySelector === 'function' &&
           el.querySelector('.translate-king-wrapper, [data-tk-replaced]')) ||
-        hasRealChildBlocks
+        hasNonToggleChildBlock
       ) {
         continue;
       }
 
-      // 若 el 是 span 或 a（且不是行内聚合段容器），并且其直接父级 div/li 也是叶子容器，则跳过子级，让父级整体提取整句
-      const parentHasRealChildBlocks =
+      // 若 el 是 span 或 a，且其直接父级 div/li 也是叶子容器，则跳过子级，让父级整体提取整句
+      const parentHasNonToggleBlock =
         el.parentElement && typeof el.parentElement.querySelectorAll === 'function'
-          ? Array.from(el.parentElement.querySelectorAll(CHILD_BLOCK_SELECTOR)).some(
-              (c) => c.tagName !== 'BUTTON' && !isExpandToggleButton(c)
-            )
+          ? Array.from(el.parentElement.querySelectorAll(CHILD_BLOCK_SELECTOR)).some((c) => !isExpandToggleButton(c))
           : false;
       if (
         (el.tagName === 'SPAN' || el.tagName === 'A') &&
-        !el.hasAttribute('data-tk-inline-group') &&
         el.parentElement &&
         typeof el.parentElement.querySelector === 'function' &&
-        !parentHasRealChildBlocks &&
+        !parentHasNonToggleBlock &&
         !el.parentElement.querySelector('.translate-king-wrapper, [data-tk-replaced]')
       ) {
         continue;
@@ -730,191 +711,6 @@ export function extractTranslatableBlocks(
   }
 
   return blocks;
-}
-
-const INLINE_RUN_TAGS = new Set([
-  'SPAN',
-  'A',
-  'B',
-  'STRONG',
-  'EM',
-  'I',
-  'CODE',
-  'SUP',
-  'SUB',
-  'SMALL',
-  'MARK',
-  'FONT',
-  'LABEL',
-  'ABBR',
-  'TIME',
-  'KBD',
-  'SAMP',
-  'VAR',
-  'Q',
-  'CITE',
-  'DFN',
-  'DEL',
-  'INS',
-  'S',
-  'U',
-  'BR'
-]);
-
-/**
- * 通用混合容器行内文本流聚合成段：
- * 当一个块级容器 (div, li, td, th, dd, dt, section, article, blockquote) 同时包含子块级容器（如嵌套的 <ul>、<div>）
- * 与直接子级行内节点（裸 TextNode 或连续的 <span>/<a>/<b>）时，将该连续行内节点流包裹为 <span data-tk-inline-group="true">，
- * 从而保证：
- * 1. 混合容器中的裸 TextNode 绝不会因为父容器被跳过而漏翻；
- * 2. 同一句话中的多个行内标签（如 "Sentence start <span>middle</span> and <a href='#'>link</a>."）作为完整单句提取，绝不被拆成多个垂直译文框。
- */
-function groupMixedContainerInlineRuns(
-  root: ParentNode,
-  processedElements: Set<HTMLElement>,
-  targetLang?: string
-): void {
-  if (typeof root.querySelectorAll !== 'function') return;
-  let containers: HTMLElement[] = [];
-  try {
-    containers = Array.from(
-      root.querySelectorAll<HTMLElement>('div, li, td, th, dd, dt, section, article, blockquote')
-    );
-  } catch {
-    return;
-  }
-
-  for (const container of containers) {
-    if (processedElements.has(container)) continue;
-    if (isElementEffectivelyTranslated(container)) continue;
-    if (shouldIgnoreElement(container)) continue;
-    if (
-      typeof container.closest === 'function' &&
-      container.closest(
-        '[data-tk-id], [data-tk-translated], [data-tk-replaced], [data-tk-inline-group="true"], button, a, .translate-king-wrapper'
-      )
-    ) {
-      continue;
-    }
-
-    // 仅当 container 内部存在真正的子块级元素或已提取的子元素（导致 container 自身无法在阶段 2 作为纯叶子整体提取）时，才聚合其直接子级行内流
-    const childBlocks =
-      typeof container.querySelectorAll === 'function'
-        ? Array.from(container.querySelectorAll(CHILD_BLOCK_SELECTOR))
-        : [];
-    const hasRealChildBlocks = childBlocks.some(
-      (child) => child.tagName !== 'BUTTON' && !isExpandToggleButton(child)
-    );
-    const hasProcessedSubtree =
-      typeof container.querySelector === 'function' &&
-      container.querySelector('[data-tk-id], .translate-king-wrapper, [data-tk-replaced]') !== null;
-
-    if (!hasRealChildBlocks && !hasProcessedSubtree) {
-      continue;
-    }
-
-    const doc = container.ownerDocument || (typeof document !== 'undefined' ? document : null);
-    if (!doc || typeof doc.createElement !== 'function') continue;
-
-    const children = Array.from(container.childNodes);
-    let currentRun: Node[] = [];
-
-    const flushRun = () => {
-      if (currentRun.length === 0) return;
-
-      // 剥离首尾纯空白文本节点或首尾孤立 <br>
-      while (
-        currentRun.length > 0 &&
-        ((currentRun[0].nodeType === 3 && !(currentRun[0].nodeValue || '').trim()) ||
-          (currentRun[0].nodeType === 1 && (currentRun[0] as HTMLElement).tagName === 'BR'))
-      ) {
-        currentRun.shift();
-      }
-      while (
-        currentRun.length > 0 &&
-        ((currentRun[currentRun.length - 1].nodeType === 3 &&
-          !(currentRun[currentRun.length - 1].nodeValue || '').trim()) ||
-          (currentRun[currentRun.length - 1].nodeType === 1 &&
-            (currentRun[currentRun.length - 1] as HTMLElement).tagName === 'BR'))
-      ) {
-        currentRun.pop();
-      }
-
-      if (currentRun.length === 0) return;
-
-      const hasNonEmptyTextNode = currentRun.some(
-        (n) => n.nodeType === 3 && /\p{L}/u.test(n.nodeValue || '')
-      );
-      const elementNodes = currentRun.filter((n): n is HTMLElement => n.nodeType === 1);
-      const hasOrphanFormattingTag = elementNodes.some(
-        (el) => el.tagName !== 'SPAN' && el.tagName !== 'A' && el.tagName !== 'BR'
-      );
-      const hasConnectedInlineElements =
-        elementNodes.length >= 2 &&
-        !elementNodes.every((el) => el.tagName === 'A') &&
-        elementNodes.some((el) => {
-          const raw = el.textContent || '';
-          return /^\s|\s$/.test(raw) || /[,;:—–-]$/.test(raw.trim());
-        });
-
-      if (hasNonEmptyTextNode || hasOrphanFormattingTag || hasConnectedInlineElements) {
-        const combinedText = currentRun
-          .map((n) => n.textContent || '')
-          .join(' ')
-          .replace(/\s+/g, ' ')
-          .trim();
-
-        if (
-          isValidTranslatableText(combinedText) &&
-          !isAlreadyInTargetLanguage(combinedText, targetLang)
-        ) {
-          const groupSpan = doc.createElement('span');
-          groupSpan.setAttribute('data-tk-inline-group', 'true');
-          const firstNode = currentRun[0];
-          if (firstNode.parentNode === container) {
-            container.insertBefore(groupSpan, firstNode);
-            for (const node of currentRun) {
-              groupSpan.appendChild(node);
-            }
-          }
-        }
-      }
-
-      currentRun = [];
-    };
-
-    for (const node of children) {
-      if (node.nodeType === 3) {
-        currentRun.push(node);
-      } else if (node.nodeType === 1) {
-        const el = node as HTMLElement;
-        const role = el.getAttribute?.('role') || '';
-        const isInlineCandidate =
-          INLINE_RUN_TAGS.has(el.tagName) &&
-          !el.hasAttribute('data-tk-inline-group') &&
-          !processedElements.has(el) &&
-          !el.hasAttribute('data-tk-id') &&
-          !isElementEffectivelyTranslated(el) &&
-          !shouldIgnoreElement(el) &&
-          role !== 'button' &&
-          role !== 'heading' &&
-          role !== 'tab' &&
-          !(el.tagName === 'A' && (el.classList?.contains('btn') || el.classList?.contains('button'))) &&
-          (!el.querySelector ||
-            (!el.querySelector(CHILD_BLOCK_SELECTOR) &&
-              !el.querySelector('[data-tk-id], .translate-king-wrapper, [data-tk-replaced]')));
-
-        if (isInlineCandidate) {
-          currentRun.push(el);
-        } else {
-          flushRun();
-        }
-      } else {
-        flushRun();
-      }
-    }
-    flushRun();
-  }
 }
 
 /**
@@ -951,14 +747,12 @@ function processElement(
       '.translate-king-wrapper, style, script, noscript, .visually-hidden, .sr-only, .feed-shared-inline-show-more-text__see-more-less-toggle, [class*="see-more"], [class*="show-more"], [data-anonymize*="see-more"]'
     ).forEach((n) => n.remove());
 
-    // 彻底清除段落内部嵌套的按钮（如展开按钮、复制按钮、角标按钮），防止按钮文字混入段落正文或导致段落被拒
-    if (el.tagName !== 'BUTTON') {
-      clone.querySelectorAll('button, [role="button"]').forEach((btn) => {
-        if (btn.tagName === 'BUTTON' || isExpandToggleButton(btn)) {
-          btn.remove();
-        }
-      });
-    }
+    // 彻底清除嵌套在段落内部的折叠展开控制按钮（如 "...更多"、"...see more"），或标准文章 <p> 内的单个内联按钮
+    clone.querySelectorAll('button, [role="button"]').forEach((btn) => {
+      if (isExpandToggleButton(btn) || (el.tagName === 'P' && btn.tagName === 'BUTTON')) {
+        btn.remove();
+      }
+    });
 
     // 社交媒体适配：仅对真正的 Emoji 图标保留其 alt 字符，绝不将头像 (如 "Square头像") 或角标混入文本
     clone.querySelectorAll('img').forEach((img) => {
@@ -1041,12 +835,10 @@ function processElement(
     return;
   }
 
-  // 严格防卫：任何含有嵌套卡片、多个无关操作按钮、已标记/已替换子元素、或复杂组件的复合外层容器，绝不能作为单一片段收录
-  // 但对于标准语义段落 (P, H1-H6, LI, BLOCKQUOTE, TD, DD, DT)，即使内部带有 1 个内联小按钮（已在 clone 中剥离），也允许正常翻译该段落！
-  const isSemanticParagraph = /^(P|H1|H2|H3|H4|H5|H6|BLOCKQUOTE|LI|TD|TH|DD|DT|FIGCAPTION)$/.test(el.tagName);
+  // 严格防卫：任何含有嵌套卡片、无关操作按钮（除折叠展开更多按钮或普通 <p> 内单个小按钮外）、已标记/已替换子元素、或复杂组件的复合外层容器，绝不能作为单一片段收录
   const allChildButtons = typeof el.querySelectorAll === 'function' ? Array.from(el.querySelectorAll('button')) : [];
   const unrelatedButtons = allChildButtons.filter((b) => !isExpandToggleButton(b));
-  const hasBlockingChildButtons = isSemanticParagraph ? unrelatedButtons.length > 2 : unrelatedButtons.length > 0;
+  const hasBlockingChildButtons = el.tagName === 'P' ? unrelatedButtons.length > 1 : unrelatedButtons.length > 0;
   if (
     typeof el.querySelector === 'function' &&
     (el.querySelector('[data-tk-id], [data-tk-replaced]') ||

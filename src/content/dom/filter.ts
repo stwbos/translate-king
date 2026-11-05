@@ -167,12 +167,18 @@ export function isElementEffectivelyTranslated(el: Element): boolean {
     el.removeAttribute('data-tk-translated');
   }
 
-  // 5. 如果某个祖先节点正在翻译或已经挂载了双语译文容器，
+  // 5. 如果某个祖先节点正在翻译、已直接替换、或已经挂载了双语译文容器，
   // 说明该祖先段落已被整体接管，其内部的任何子 <span> / <a> / <b> 绝不能再被拆碎重复提取！
   if (typeof el.closest === 'function') {
-    const lockedAncestor = el.closest('[data-tk-translated="true"], [data-tk-loading]');
+    const lockedAncestor = el.closest('[data-tk-translated="true"], [data-tk-replaced="true"], [data-tk-loading]');
     if (lockedAncestor && lockedAncestor !== el) {
-      if (
+      if (lockedAncestor.hasAttribute('data-tk-replaced')) {
+        const ancTrans = (lockedAncestor.getAttribute('data-tk-trans-text') || '').replace(/\s+/g, ' ').trim();
+        const ancCurr = (lockedAncestor.textContent || '').replace(/\s+/g, ' ').trim();
+        if (ancTrans && ancCurr && (ancCurr === ancTrans || ancCurr.includes(ancTrans))) {
+          return true;
+        }
+      } else if (
         isLoadingLockActive(lockedAncestor) ||
         lockedAncestor.querySelector('.translate-king-wrapper')
       ) {
@@ -184,11 +190,11 @@ export function isElementEffectivelyTranslated(el: Element): boolean {
     }
   }
 
-  // 6. 如果存在直接替换标记，检查其内容是否依然维持译文状态
+  // 6. 如果存在直接替换标记，检查其内容是否依然维持译文状态（规范化空白字符对比，防止换行或内嵌按钮导致误判失效）
   if (typeof el.hasAttribute === 'function' && el.hasAttribute('data-tk-replaced')) {
-    const origText = el.getAttribute('data-tk-orig-text')?.trim();
-    const transText = el.getAttribute('data-tk-trans-text')?.trim();
-    const currentText = el.textContent?.trim();
+    const origText = (el.getAttribute('data-tk-orig-text') || '').replace(/\s+/g, ' ').trim();
+    const transText = (el.getAttribute('data-tk-trans-text') || '').replace(/\s+/g, ' ').trim();
+    const currentText = (el.textContent || '').replace(/\s+/g, ' ').trim();
 
     const isStillTranslated =
       transText && currentText ? currentText === transText || currentText.includes(transText) : false;
