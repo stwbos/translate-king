@@ -757,9 +757,9 @@ export function togglePageTranslation(
   mode: TranslationMode = activeTranslationMode
 ): void {
   const now = Date.now();
-  // 防抖保护：防止 Alt+T 快捷键在 DOM keydown 和 background chrome.commands 双重监听下发生同毫秒冲抵关停
-  if (now - lastToggleTimestamp < 400) {
-    console.warn('[TranslateKing] 忽略 400ms 内重复收到的切换指令（防止双重快捷键冲抵）');
+  // 防抖保护：防止 Alt+T 快捷键在 DOM keydown 和 background chrome.commands (Service Worker 唤醒延迟可达 600ms) 双重监听下发生冲抵关停
+  if (now - lastToggleTimestamp < 850) {
+    console.warn('[TranslateKing] 忽略 850ms 内重复收到的切换指令（防止双重快捷键冲抵）');
     return;
   }
   lastToggleTimestamp = now;

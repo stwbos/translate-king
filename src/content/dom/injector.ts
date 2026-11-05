@@ -149,6 +149,10 @@ export function removeTranslation(element: HTMLElement): void {
   element.classList.remove('translate-king-replacing-pulse');
   element.removeAttribute('data-tk-loading');
   element.removeAttribute('data-tk-translated');
+  element.removeAttribute('data-tk-hover-unclip');
+  if (element.parentElement) {
+    element.parentElement.removeAttribute('data-tk-hover-unclip');
+  }
   element.removeAttribute('data-tk-multiline');
   if (typeof element.querySelectorAll === 'function') {
     element.querySelectorAll('br[data-tk-hidden-br]').forEach((br) => br.removeAttribute('data-tk-hidden-br'));
@@ -512,6 +516,15 @@ export function injectTranslation(
 
   wrapper.appendChild(textNode);
   block.element.setAttribute('data-tk-translated', 'true');
+  block.element.setAttribute('data-tk-hover-unclip', 'true');
+  if (
+    block.element.parentElement &&
+    block.element.parentElement.tagName !== 'BODY' &&
+    block.element.parentElement.tagName !== 'MAIN' &&
+    block.element.parentElement.tagName !== 'ARTICLE'
+  ) {
+    block.element.parentElement.setAttribute('data-tk-hover-unclip', 'true');
+  }
   block.element.appendChild(wrapper);
 
   const rootNode = typeof block.element.getRootNode === 'function' ? block.element.getRootNode() : null;
@@ -537,11 +550,12 @@ export function clearAllTranslations(root: ParentNode = document): void {
     });
 
     // 3. 清理标记
-    const allTagged = r.querySelectorAll('[data-tk-id], [data-tk-loading], [data-tk-translated]');
+    const allTagged = r.querySelectorAll('[data-tk-id], [data-tk-loading], [data-tk-translated], [data-tk-hover-unclip]');
     allTagged.forEach((node) => {
       node.removeAttribute('data-tk-id');
       node.removeAttribute('data-tk-loading');
       node.removeAttribute('data-tk-translated');
+      node.removeAttribute('data-tk-hover-unclip');
     });
 
     // 4. 清理 shadow style
