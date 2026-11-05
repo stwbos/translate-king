@@ -1,0 +1,587 @@
+/**
+ * 翻译王 (TranslateKing) - 双模式 PDF 与文档双语工作台样式表
+ */
+
+:root {
+  --tk-bg-dark: #070d19;
+  --tk-bg-panel: #0f1d3a;
+  --tk-bg-card: #111c33;
+  --tk-blue-primary: #2563eb;
+  --tk-blue-bright: #3b82f6;
+  --tk-blue-light: #93c5fd;
+  --tk-gold-accent: #fbbf24;
+  --tk-text-main: #f8fafc;
+  --tk-text-muted: #94a3b8;
+  --tk-border-blue: rgba(59, 130, 246, 0.35);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body, html {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  min-height: 100vh;
+  background: var(--tk-bg-dark);
+  color: var(--tk-text-main);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Segoe UI", Roboto, "Microsoft YaHei", sans-serif;
+}
+
+.tk-pdf-app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+/* 顶部导航栏 */
+.tk-pdf-header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 20px;
+  background: linear-gradient(135deg, rgba(15, 29, 58, 0.96) 0%, rgba(9, 17, 34, 0.98) 100%);
+  border-bottom: 1px solid var(--tk-border-blue);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  flex-wrap: wrap;
+}
+
+.tk-pdf-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.tk-pdf-brand-title {
+  font-size: 15px;
+  font-weight: 800;
+  color: #eff6ff;
+  letter-spacing: -0.01em;
+}
+
+.tk-pdf-doc-subtitle {
+  font-size: 11.5px;
+  color: var(--tk-blue-light);
+  max-width: 280px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 核心：三大模式切换胶囊组 */
+.tk-pdf-mode-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  background: rgba(2, 6, 23, 0.78);
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  border-radius: 12px;
+}
+
+.tk-mode-btn {
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 7px 14px;
+  border-radius: 9px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  white-space: nowrap;
+}
+
+.tk-mode-btn:hover {
+  color: #e2e8f0;
+  background: rgba(59, 130, 246, 0.12);
+}
+
+.tk-mode-btn.is-active {
+  background: linear-gradient(135deg, #1d4ed8, #2563eb);
+  color: #ffffff;
+  box-shadow: 0 2px 10px rgba(37, 99, 235, 0.5);
+}
+
+/* 顶部右侧操作按钮组 */
+.tk-pdf-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tk-pdf-select {
+  background: rgba(15, 23, 42, 0.9);
+  color: #e2e8f0;
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  outline: none;
+}
+
+.tk-pdf-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  background: rgba(30, 58, 138, 0.32);
+  color: #dbeafe;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.tk-pdf-btn:hover {
+  background: rgba(37, 99, 235, 0.48);
+  border-color: rgba(96, 165, 250, 0.7);
+  transform: translateY(-1px);
+}
+
+.tk-pdf-btn-primary {
+  background: linear-gradient(135deg, #1e40af, #2563eb);
+  border-color: #3b82f6;
+  color: #ffffff;
+}
+
+.tk-pdf-btn-accent {
+  background: linear-gradient(135deg, rgba(217, 119, 6, 0.85), rgba(245, 158, 11, 0.85));
+  border-color: rgba(251, 191, 36, 0.65);
+  color: #ffffff;
+}
+
+.tk-pdf-btn-lg {
+  padding: 11px 20px;
+  font-size: 14px;
+  border-radius: 10px;
+}
+
+/* URL 输入栏 */
+.tk-pdf-url-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 20px;
+  background: rgba(15, 23, 42, 0.95);
+  border-bottom: 1px solid rgba(59, 130, 246, 0.28);
+}
+
+.tk-pdf-url-bar[hidden] {
+  display: none !important;
+}
+
+.tk-pdf-url-input {
+  flex: 1;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(59, 130, 246, 0.45);
+  background: #091122;
+  color: #f8fafc;
+  font-size: 13px;
+  outline: none;
+}
+
+/* 全文总结抽屉 */
+.tk-pdf-summary-drawer {
+  margin: 14px 20px 0 20px;
+  padding: 14px 18px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #0f1d3a 0%, #091122 100%);
+  border: 1px solid rgba(59, 130, 246, 0.45);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+}
+
+.tk-pdf-summary-drawer[hidden] {
+  display: none !important;
+}
+
+.tk-summary-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(59, 130, 246, 0.25);
+}
+
+.tk-summary-drawer-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #93c5fd;
+}
+
+.tk-summary-drawer-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 10px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.tk-pdf-summary-card {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(30, 58, 138, 0.25);
+  border: 1px solid rgba(59, 130, 246, 0.28);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.tk-pdf-summary-card:hover {
+  border-color: #60a5fa;
+  background: rgba(37, 99, 235, 0.32);
+}
+
+/* 初始拖拽引导区 */
+.tk-pdf-dropzone {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 36px 20px;
+}
+
+.tk-pdf-dropzone[hidden] {
+  display: none !important;
+}
+
+.tk-dropzone-card {
+  max-width: 760px;
+  width: 100%;
+  padding: 40px 36px;
+  border-radius: 20px;
+  background: radial-gradient(circle at top, rgba(30, 64, 175, 0.32), rgba(15, 23, 42, 0.92));
+  border: 2px dashed rgba(59, 130, 246, 0.5);
+  text-align: center;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.55);
+}
+
+.tk-dropzone-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.25);
+  border: 1px solid rgba(59, 130, 246, 0.5);
+  color: #93c5fd;
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 14px;
+}
+
+.tk-dropzone-title {
+  font-size: 24px;
+  font-weight: 800;
+  margin: 0 0 12px 0;
+  color: #f8fafc;
+}
+
+.tk-dropzone-desc {
+  font-size: 14px;
+  line-height: 1.65;
+  color: #cbd5e1;
+  margin: 0 auto 24px auto;
+  max-width: 640px;
+}
+
+.tk-dropzone-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 26px;
+}
+
+.tk-dropzone-features {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-align: left;
+  background: rgba(9, 17, 34, 0.72);
+  padding: 14px 18px;
+  border-radius: 12px;
+  border: 1px solid rgba(59, 130, 246, 0.22);
+}
+
+.tk-feature-pill {
+  font-size: 12.5px;
+  color: #cbd5e1;
+  line-height: 1.5;
+}
+
+/* 主阅读工作区 */
+.tk-pdf-workspace[hidden] {
+  display: none !important;
+}
+
+.tk-workspace-statusbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 20px;
+  background: rgba(15, 29, 58, 0.65);
+  border-bottom: 1px solid rgba(59, 130, 246, 0.2);
+  font-size: 12px;
+  color: #93c5fd;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.tk-status-tip {
+  color: #94a3b8;
+}
+
+.tk-pdf-pages-container {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  padding: 24px 20px 60px 20px;
+  max-width: 1680px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* 每一页的双栏行容器 */
+.tk-pdf-page-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  align-items: start;
+}
+
+/* 单栏模式：隐藏左侧原稿画布，将右侧原位译文画布居中放大展示 */
+.tk-pdf-workspace[data-view-mode="single"] .tk-pdf-page-row {
+  grid-template-columns: minmax(0, 920px);
+  justify-content: center;
+}
+
+.tk-pdf-workspace[data-view-mode="single"] .tk-pdf-left-pane {
+  display: none !important;
+}
+
+.tk-pdf-pane-card {
+  position: relative;
+  border-radius: 14px;
+  background: #ffffff;
+  color: #0f172a;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  border: 2px solid rgba(59, 130, 246, 0.3);
+}
+
+.tk-pdf-pane-badge {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  z-index: 30;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.82);
+  color: #93c5fd;
+  font-size: 11px;
+  font-weight: 700;
+  pointer-events: none;
+}
+
+.tk-pdf-canvas-stage {
+  position: relative;
+  width: 100%;
+  background: #ffffff;
+}
+
+.tk-pdf-canvas-stage canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* 左栏：原版 PDF 上的聚光灯交互热区框 */
+.tk-pdf-spotlight-box {
+  position: absolute;
+  border: 1.5px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.16s ease;
+  z-index: 15;
+}
+
+.tk-pdf-spotlight-box:hover,
+.tk-pdf-spotlight-box.is-spotlight-active {
+  background: rgba(37, 99, 235, 0.16);
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.28), 0 4px 14px rgba(37, 99, 235, 0.25);
+}
+
+/* 模式一（沉浸式原位对照模式）与模式三（单栏原位模式）：在右栏 PDF 画布上原坐标覆盖中文译文块 */
+.tk-pdf-overlay-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  pointer-events: auto;
+}
+
+.tk-pdf-overlay-block {
+  position: absolute;
+  background: rgba(255, 255, 255, 0.96);
+  color: #0f172a;
+  padding: 2px 4px;
+  border-radius: 3px;
+  border-left: 2.5px solid #2563eb;
+  font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", -apple-system, sans-serif;
+  line-height: 1.32;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  cursor: pointer;
+  transition: box-shadow 0.15s ease, transform 0.15s ease, z-index 0s;
+  user-select: text;
+}
+
+.tk-pdf-overlay-block.is-heading {
+  font-weight: 700;
+  color: #1e3a8a;
+  border-left-color: #f59e0b;
+}
+
+.tk-pdf-overlay-block.is-formula {
+  background: rgba(239, 246, 255, 0.92);
+  border-left-color: #8b5cf6;
+  font-family: "Times New Roman", "STIXGeneral", Georgia, serif;
+}
+
+.tk-pdf-overlay-block:hover,
+.tk-pdf-overlay-block.is-spotlight-active {
+  z-index: 50 !important;
+  overflow: visible !important;
+  height: auto !important;
+  min-height: var(--tk-orig-h, auto);
+  background: #ffffff !important;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.28), 0 0 0 2px #2563eb !important;
+}
+
+/* 模式二（翻译王聚光灯双栏精读流）：右侧自适应大字号双语卡片面板 */
+.tk-pdf-spotlight-stream {
+  display: none;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px 18px;
+  background: linear-gradient(180deg, #0f1d3a 0%, #091122 100%);
+  color: #f8fafc;
+  min-height: 100%;
+  user-select: text;
+}
+
+.tk-pdf-workspace[data-view-mode="spotlight"] .tk-pdf-right-canvas-wrap {
+  display: none !important;
+}
+
+.tk-pdf-workspace[data-view-mode="spotlight"] .tk-pdf-spotlight-stream {
+  display: flex !important;
+}
+
+.tk-stream-card {
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(30, 41, 59, 0.72);
+  border: 1px solid rgba(59, 130, 246, 0.22);
+  border-left: 3.5px solid #3b82f6;
+  transition: all 0.16s ease;
+  cursor: pointer;
+}
+
+.tk-stream-card.is-heading {
+  background: linear-gradient(135deg, rgba(30, 64, 175, 0.42), rgba(15, 23, 42, 0.9));
+  border-left-color: #fbbf24;
+}
+
+.tk-stream-card.is-formula {
+  background: rgba(30, 27, 75, 0.65);
+  border-left-color: #a855f7;
+}
+
+.tk-stream-card:hover,
+.tk-stream-card.is-spotlight-active {
+  background: rgba(37, 99, 235, 0.24);
+  border-color: #60a5fa;
+  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.28);
+}
+
+.tk-stream-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #93c5fd;
+  margin-bottom: 5px;
+}
+
+.tk-stream-orig {
+  font-size: 13px;
+  line-height: 1.55;
+  color: #cbd5e1;
+  margin-bottom: 6px;
+}
+
+.tk-stream-trans {
+  font-size: 14.5px;
+  font-weight: 600;
+  line-height: 1.62;
+  color: #f8fafc;
+}
+
+.tk-stream-snapshot-canvas {
+  display: block;
+  max-width: 100%;
+  border-radius: 6px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  margin: 6px 0;
+  background: #ffffff;
+}
+
+/* 行内保护的数学公式徽章 ({v1} 还原节点) */
+.tk-math-token {
+  display: inline-block;
+  padding: 0 5px;
+  margin: 0 2px;
+  border-radius: 4px;
+  background: rgba(59, 130, 246, 0.16);
+  color: #1d4ed8;
+  font-family: "Times New Roman", "STIXGeneral", "Cambria Math", Georgia, serif;
+  font-style: italic;
+  font-weight: 600;
+}
+
+.tk-stream-card .tk-math-token {
+  background: rgba(96, 165, 250, 0.2);
+  color: #fde047;
+}
+
+@media print {
+  .tk-pdf-header,
+  .tk-pdf-url-bar,
+  .tk-workspace-statusbar {
+    display: none !important;
+  }
+  body {
+    background: #ffffff !important;
+  }
+  .tk-pdf-pages-container {
+    padding: 0 !important;
+  }
+}

@@ -221,6 +221,28 @@ document.addEventListener('DOMContentLoaded', async () => {
     chrome.storage.local.set({ enableSelection: enableSelectionToggle.checked });
   });
 
+  // 点击底部宫格「悬停译(Ctrl)」切换开关
+  const hoverTranslateCardBtn = document.getElementById('hoverTranslateCardBtn') as HTMLButtonElement | null;
+  chrome.storage.local.get(['enableHoverTranslate'], (hData) => {
+    const hoverOn = hData.enableHoverTranslate !== false;
+    hoverTranslateCardBtn?.classList.toggle('is-enabled', hoverOn);
+  });
+  hoverTranslateCardBtn?.addEventListener('click', () => {
+    const nextEnabled = !hoverTranslateCardBtn.classList.contains('is-enabled');
+    hoverTranslateCardBtn.classList.toggle('is-enabled', nextEnabled);
+    chrome.storage.local.set({ enableHoverTranslate: nextEnabled });
+  });
+
+  // 点击「📄 PDF / 论文双模式对照阅读」打开 PDF 工作台
+  const openPdfStudioBtn = document.getElementById('openPdfStudioBtn') as HTMLButtonElement | null;
+  openPdfStudioBtn?.addEventListener('click', () => {
+    let studioUrl = chrome.runtime.getURL('pdf.html');
+    if (tab?.url && (/\.pdf($|\?|#)/i.test(tab.url) || /\/pdf\/\d+\.\d+/i.test(tab.url))) {
+      studioUrl += `?file=${encodeURIComponent(tab.url)}`;
+    }
+    chrome.tabs.create({ url: studioUrl });
+  });
+
   // 快捷文本互译面板逻辑
   openTextTranslateBtn?.addEventListener('click', () => {
     if (!textTranslateDrawer) return;

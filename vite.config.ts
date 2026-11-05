@@ -9,6 +9,7 @@ export default defineConfig({
       input: {
         popup: resolve(__dirname, 'popup.html'),
         options: resolve(__dirname, 'options.html'),
+        pdf: resolve(__dirname, 'pdf.html'),
         background: resolve(__dirname, 'src/background/index.ts'),
         content: resolve(__dirname, 'src/content/index.ts'),
         'yt-bridge': resolve(__dirname, 'src/content/youtube/yt-bridge.ts'),

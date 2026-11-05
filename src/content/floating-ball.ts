@@ -12,6 +12,12 @@
 
 import { TranslationMode } from '../types';
 import { createTranslateKingLogoElement } from './logo';
+import {
+  isCtrlHoverTranslateEnabled,
+  setCtrlHoverTranslateEnabled,
+  openPdfStudioPage,
+  toggleWebpageSummaryPanel
+} from './hover-translate';
 
 export type WebTranslationTheme = 'default' | 'clean' | 'underline' | 'mask' | 'quote';
 
@@ -435,6 +441,31 @@ function getShadowCss(): string {
       color: #3B82F6;
       text-decoration: underline;
     }
+    .tk-quick-actions-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+    .tk-quick-action-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      padding: 7px 8px;
+      border-radius: 8px;
+      border: 1px solid rgba(59, 130, 246, 0.42);
+      background: linear-gradient(135deg, rgba(30, 64, 175, 0.45), rgba(37, 99, 235, 0.25));
+      color: #DBEAFE;
+      font-size: 11.5px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .tk-quick-action-btn:hover {
+      background: linear-gradient(135deg, rgba(37, 99, 235, 0.65), rgba(59, 130, 246, 0.45));
+      border-color: #60A5FA;
+      color: #FFFFFF;
+    }
   `;
 }
 
@@ -674,6 +705,70 @@ function rebuildPopoverContents(popover: HTMLElement): void {
   toggleRow.appendChild(toggleInfo);
   toggleRow.appendChild(toggleSwitch);
   popover.appendChild(toggleRow);
+
+  // 2.2 按住 Ctrl 鼠标悬停单段翻译（指哪翻哪）快捷开关
+  const ctrlHoverRow = document.createElement('div');
+  ctrlHoverRow.className = 'tk-setting-row';
+  const ctrlHoverInfo = document.createElement('div');
+  ctrlHoverInfo.className = 'tk-toggle-info';
+  const ctrlHoverTitle = document.createElement('span');
+  ctrlHoverTitle.className = 'tk-toggle-title';
+  ctrlHoverTitle.textContent = '鼠标悬停单段译';
+  const ctrlKbd = document.createElement('span');
+  ctrlKbd.className = 'tk-kbd';
+  ctrlKbd.textContent = 'Ctrl';
+  ctrlHoverInfo.appendChild(ctrlHoverTitle);
+  ctrlHoverInfo.appendChild(ctrlKbd);
+
+  const isHoverOn = isCtrlHoverTranslateEnabled();
+  const ctrlSwitch = document.createElement('button');
+  ctrlSwitch.className = `tk-switch ${isHoverOn ? 'is-on' : ''}`;
+  ctrlSwitch.setAttribute('role', 'switch');
+  ctrlSwitch.setAttribute('aria-checked', String(isHoverOn));
+  ctrlSwitch.setAttribute('title', '将鼠标指在任意外文段落上按一下 Ctrl 键即可单独展开/还原该段双语');
+  const ctrlKnob = document.createElement('span');
+  ctrlKnob.className = 'tk-switch-knob';
+  ctrlSwitch.appendChild(ctrlKnob);
+  ctrlSwitch.addEventListener('click', (e) => {
+    e.stopPropagation();
+    setCtrlHoverTranslateEnabled(!isCtrlHoverTranslateEnabled());
+    rebuildPopoverContents(popover);
+  });
+  ctrlHoverRow.appendChild(ctrlHoverInfo);
+  ctrlHoverRow.appendChild(ctrlSwitch);
+  popover.appendChild(ctrlHoverRow);
+
+  // 2.5 灵动快捷工具栏（总结此页/视频 + 打开双模式 PDF 阅读器）
+  const quickGrid = document.createElement('div');
+  quickGrid.className = 'tk-quick-actions-grid';
+
+  const summaryQuickBtn = document.createElement('button');
+  summaryQuickBtn.className = 'tk-quick-action-btn';
+  summaryQuickBtn.setAttribute('data-tk-action', 'summary');
+  summaryQuickBtn.textContent = '✨ 总结此页/视频';
+  summaryQuickBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const dock = popover.closest('.tk-dock-root');
+    if (dock) dock.classList.remove('is-open');
+    toggleWebpageSummaryPanel();
+  });
+
+  const pdfQuickBtn = document.createElement('button');
+  pdfQuickBtn.className = 'tk-quick-action-btn';
+  pdfQuickBtn.setAttribute('data-tk-action', 'pdf-studio');
+  pdfQuickBtn.textContent = '📄 PDF 双语阅读';
+  pdfQuickBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const dock = popover.closest('.tk-dock-root');
+    if (dock) dock.classList.remove('is-open');
+    const href = window.location.href || '';
+    const isPdf = /\.pdf(?:$|\?|#)/i.test(href) || /arxiv\.org\/pdf\//i.test(href);
+    openPdfStudioPage(isPdf ? href : undefined, 'immersive');
+  });
+
+  quickGrid.appendChild(summaryQuickBtn);
+  quickGrid.appendChild(pdfQuickBtn);
+  popover.appendChild(quickGrid);
 
   // 3. 翻译显示模式（双语对照 / 仅看译文）
   const modeWrap = document.createElement('div');

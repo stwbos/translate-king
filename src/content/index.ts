@@ -28,6 +28,11 @@ import {
   applyWebTranslationTheme,
   WebTranslationTheme
 } from './floating-ball';
+import {
+  initCtrlHoverParagraphTranslate,
+  mountOnlinePdfDetectorBanner,
+  toggleWebpageSummaryPanel
+} from './hover-translate';
 
 /**
  * 校验扩展上下文生命周期状态（避免扩展被开发者刷新后旧标签页 Content Script 失效报红）
@@ -184,6 +189,16 @@ setupUniversalVideoLifecycle(activeTargetLang);
 
 // 启动连按 3 次空格输入框翻译 & 按住 Alt 鼠标悬停单段即时翻译
 setupInteractiveShortcuts(() => activeTargetLang);
+
+// 启动按 Ctrl 键鼠标悬停单段双语翻译 & 在线 PDF/arXiv 论文双模式阅读条探测
+initCtrlHoverParagraphTranslate(() => activeTargetLang);
+if (typeof document !== 'undefined') {
+  if (document.body) {
+    mountOnlinePdfDetectorBanner();
+  } else {
+    window.addEventListener('DOMContentLoaded', () => mountOnlinePdfDetectorBanner());
+  }
+}
 
 /**
  * Content Script L0 极速内存缓存 (原文 -> 译文)
@@ -1084,6 +1099,9 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
   if (message.type === 'TOGGLE_PAGE_TRANSLATION') {
     togglePageTranslation(message.targetLang || activeTargetLang, message.mode || activeTranslationMode);
     sendResponse({ success: true, isTranslated: isPageTranslated, mode: activeTranslationMode });
+  } else if ((message as any).type === 'OPEN_WEBPAGE_SUMMARY') {
+    toggleWebpageSummaryPanel(activeTargetLang);
+    sendResponse({ success: true });
   } else if (message.type === 'GET_PAGE_STATUS') {
     const activeCount = typeof document !== 'undefined'
       ? document.querySelectorAll('.translate-king-wrapper.translate-king-done, [data-tk-replaced]').length

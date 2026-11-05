@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>翻译王 - 双模式学术 PDF 与文档双语工作台</title>
+  <link rel="stylesheet" href="./src/pdf/pdf.css" />
+</head>
+<body>
+  <div id="tk-pdf-app" class="tk-pdf-app">
+    <!-- 顶部宝石蓝总控工具栏 -->
+    <header class="tk-pdf-header">
+      <div class="tk-pdf-brand">
+        <div id="tk-pdf-brand-logo" class="tk-pdf-logo-slot"></div>
+        <div class="tk-pdf-brand-text">
+          <div class="tk-pdf-brand-title">翻译王 PDF Studio</div>
+          <div id="tk-pdf-doc-name" class="tk-pdf-doc-subtitle">支持沉浸式原位覆盖 &amp; 聚光灯双栏精读 · 数学公式无损保护</div>
+        </div>
+      </div>
+
+      <!-- 核心：三大 PDF 双语模式一键切换器（沉浸式方案 vs 翻译王聚光灯方案） -->
+      <div class="tk-pdf-mode-switcher" role="tablist" aria-label="PDF 阅读模式切换">
+        <button id="mode-btn-immersive" class="tk-mode-btn is-active" data-mode="immersive" title="沉浸式翻译方案：左原稿 PDF + 右原版面坐标原位覆盖译文">
+          🖼️ 沉浸式原位对照
+        </button>
+        <button id="mode-btn-spotlight" class="tk-mode-btn" data-mode="spotlight" title="翻译王独创方案：左原稿聚光灯定位 + 右大字号双语卡片流 &amp; 公式高清切片">
+          🔦 聚光灯双栏精读
+        </button>
+        <button id="mode-btn-single" class="tk-mode-btn" data-mode="single" title="单栏全宽原位覆盖译文 PDF（悬停段落查看原文）">
+          📄 单栏原位译文
+        </button>
+      </div>
+
+      <!-- 右侧工具动作组 -->
+      <div class="tk-pdf-actions">
+        <select id="tk-pdf-target-lang" class="tk-pdf-select" title="选择目标翻译语言">
+          <option value="zh-CN">🇨🇳 简体中文</option>
+          <option value="zh-TW">🇭🇰 繁體中文</option>
+          <option value="en">🇺🇸 English</option>
+          <option value="ja">🇯🇵 日本語</option>
+          <option value="ko">🇰🇷 한국어</option>
+          <option value="fr">🇫🇷 Français</option>
+          <option value="de">🇩🇪 Deutsch</option>
+          <option value="es">🇪🇸 Español</option>
+        </select>
+
+        <label class="tk-pdf-btn tk-pdf-btn-primary" for="tk-pdf-file-input" title="上传本地 PDF / TXT / Markdown / SRT 文档">
+          📂 打开文件
+        </label>
+        <input id="tk-pdf-file-input" type="file" accept=".pdf,.txt,.md,.srt,.vtt,application/pdf,text/plain,text/markdown" hidden />
+
+        <button id="tk-pdf-url-btn" class="tk-pdf-btn" type="button" title="输入在线 PDF 链接 (如 arXiv 论文链接)">
+          🔗 在线链接
+        </button>
+
+        <button id="tk-pdf-demo-btn" class="tk-pdf-btn tk-pdf-btn-accent" type="button" title="一键加载内置双栏学术论文示例（含 Transformer 数学公式），立即对比两种模式效果">
+          🧪 论文示例
+        </button>
+
+        <button id="tk-pdf-summary-btn" class="tk-pdf-btn" type="button" title="生成整篇 PDF / 文档的章节核心总结">
+          📌 全文总结
+        </button>
+
+        <button id="tk-pdf-export-md-btn" class="tk-pdf-btn" type="button" title="导出完整双语对照 Markdown 笔记 (.md)">
+          📥 导出 .MD
+        </button>
+
+        <button id="tk-pdf-print-btn" class="tk-pdf-btn" type="button" title="打印或另存为双语对照 PDF 文件">
+          🖨️ 导出 PDF
+        </button>
+      </div>
+    </header>
+
+    <!-- 在线 URL 输入折叠条 -->
+    <div id="tk-pdf-url-bar" class="tk-pdf-url-bar" hidden>
+      <input id="tk-pdf-url-input" type="url" class="tk-pdf-url-input" placeholder="粘贴在线 PDF 链接，例如：https://arxiv.org/pdf/1706.03762.pdf" />
+      <button id="tk-pdf-url-load-btn" class="tk-pdf-btn tk-pdf-btn-primary" type="button">🚀 立即加载并翻译</button>
+      <button id="tk-pdf-url-close-btn" class="tk-pdf-btn" type="button">收起</button>
+    </div>
+
+    <!-- AI 全文章节总结抽屉 -->
+    <section id="tk-pdf-summary-drawer" class="tk-pdf-summary-drawer" hidden>
+      <div class="tk-summary-drawer-header">
+        <div class="tk-summary-drawer-title">📌 文档全文结构化核心总结 (点击章节直达对应页码)</div>
+        <button id="tk-pdf-summary-close" class="tk-pdf-btn" type="button">✕ 关闭</button>
+      </div>
+      <div id="tk-pdf-summary-list" class="tk-summary-drawer-grid"></div>
+    </section>
+
+    <!-- 拖拽上传与空状态引导区 -->
+    <div id="tk-pdf-dropzone" class="tk-pdf-dropzone">
+      <div class="tk-dropzone-card">
+        <div class="tk-dropzone-badge">PDFMathTranslate 公式保护 · 双模式自由切换</div>
+        <h1 class="tk-dropzone-title">拖入 PDF / 学术论文，即刻开启双语对照精读</h1>
+        <p class="tk-dropzone-desc">
+          同时内置 <strong>「🖼️ 沉浸式原位覆盖模式」</strong> 与 <strong>「🔦 翻译王双向聚光灯精读模式」</strong>，一键按键切换对比效果；自动识别 <code>CMMI / CMSY / Math</code> 数学公式并无损保护为 <code>{v1}</code> 占位符。
+        </p>
+        <div class="tk-dropzone-actions">
+          <label class="tk-pdf-btn tk-pdf-btn-lg tk-pdf-btn-primary" for="tk-pdf-file-input">
+            📂 选择本地 PDF / 文档 (.pdf / .md / .txt / .srt)
+          </label>
+          <button id="tk-dropzone-demo-btn" class="tk-pdf-btn tk-pdf-btn-lg tk-pdf-btn-accent" type="button">
+            🧪 一键体验《Attention Is All You Need》双栏公式论文示例
+          </button>
+        </div>
+        <div class="tk-dropzone-features">
+          <div class="tk-feature-pill">✨ <strong>模式一（沉浸式方案）</strong>：左原稿 + 右原版面原位覆盖中文，1:1 还原排版</div>
+          <div class="tk-feature-pill">🔦 <strong>模式二（聚光灯方案）</strong>：左原稿聚光灯高亮 + 右舒适大字号双语卡片 &amp; 原图公式切片</div>
+          <div class="tk-feature-pill">📐 <strong>数学公式 0 乱码</strong>：行内公式 <code>{v1}</code> 保护 + 独立大公式原版高清快照</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 主阅读工作区（按页渲染，支持双栏同步滚动与三种模式切换） -->
+    <main id="tk-pdf-workspace" class="tk-pdf-workspace" data-view-mode="immersive" hidden>
+      <div class="tk-workspace-statusbar">
+        <span id="tk-pdf-status-text">准备就绪</span>
+        <span class="tk-status-tip">💡 提示：在任意英文或中文上划选词句，即可弹出翻译王双音标词典与真人发音；点击顶部按钮可随时切换「沉浸式原位对照」与「聚光灯精读」！</span>
+      </div>
+      <div id="tk-pdf-pages-container" class="tk-pdf-pages-container"></div>
+    </main>
+  </div>
+
+  <script type="module" src="./src/pdf/pdf.ts"></script>
+</body>
+</html>

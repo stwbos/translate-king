@@ -48,7 +48,10 @@
         "icons/icon-16.png",
         "icons/icon-32.png",
         "icons/icon-48.png",
-        "icons/icon-128.png"
+        "icons/icon-128.png",
+        "pdf.html",
+        "pdfjs/pdf.min.mjs",
+        "pdfjs/pdf.worker.min.mjs"
       ],
       "matches": ["<all_urls>"]
     },

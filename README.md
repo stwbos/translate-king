@@ -9,7 +9,7 @@
 
 [![Manifest V3](https://img.shields.io/badge/Manifest-MV3-blue?logo=google-chrome&logoColor=white)](https://developer.chrome.com/docs/extensions/mv3/intro/)
 [![License GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-green.svg)](LICENSE)
-[![Tests Passed](https://img.shields.io/badge/Tests-141%2F141%20Passed-brightgreen)](tests/)
+[![Tests Passed](https://img.shields.io/badge/Tests-149%2F149%20Passed-brightgreen)](tests/)
 [![Vite 5](https://img.shields.io/badge/Built%20With-Vite%205-purple?logo=vite&logoColor=white)](https://vitejs.dev/)
 [![TypeScript 5](https://img.shields.io/badge/Language-TypeScript%205-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 
@@ -72,9 +72,30 @@
 
 ---
 
-## 🔍 划词精读、生词本与三击空格输入翻译
+## 📄 双模式 PDF & 学术论文对照阅读工作台 (`pdf.html`)
 
-- **视口防溢出划词浮窗**：在页面划选任意单词或长句，Shadow DOM 隔离浮窗即刻呈现；内置真实 DOM 边界测量与内部滚动容器，靠近屏幕边缘自动反向吸附，绝不超出视口。
+针对学术论文与 PDF 文档翻译痛点，翻译王独创**「双模式自由切换架构」**——同时内置**沉浸式原位对照方案**与**翻译王聚光灯双栏精读方案**，顶部工具栏一键毫秒级切换，把选择权完全交给用户：
+
+1. **🖼️ 模式一：沉浸式原位对照模式（1:1 坐标框原位覆盖）**
+   - 左侧渲染 100% 原始 PDF 页面 Canvas，右侧克隆 1:1 原始 PDF 页面 Canvas 并在每个英文段落的精确归一化坐标框（`normBox`）上原位覆盖中文译文。
+   - **底层 `PDFMathTranslate (pdf2zh)` 公式保护协议**：自动识别 PDF 底层数学字体（`CMMI` / `CMSY` / `CMEX` / `Math` / `Symbol`）与行内公式，翻译前替换为 `{v1}`, `{v2}` 占位符，翻译后 100% 无损还原数学公式与编号。
+   - 自适应字号拟合与悬停展开，完整保留原版 PDF 中的全部矢量图表、公式与多栏版面。
+2. **🔦 模式二：聚光灯双栏精读模式（翻译王首创 · 大字号流式卡片 + 双向聚光灯同步）**
+   - 左侧保留 100% 原始 PDF 画布并绘制交互式**皇家蓝聚光灯锚点框**；右侧提供大字号、宽行距的**双语流式精读卡片**（彻底解决双栏论文中文字体挤成蚊子腿或遮挡下方公式的问题）。
+   - **双向联动定位**：鼠标悬停或点击左侧 PDF 原文任意段落，右侧自动高亮并平滑滚动到对应译文卡片；点击右侧卡片同样实时点亮左侧原版 PDF 坐标框。
+   - **高分屏公式/图表自动快照**：遇到独立数学公式块或图表，自动从左侧 2x Retina PDF Canvas 裁剪原图快照嵌入右侧卡片，绝对零乱码。
+3. **📄 模式三：单栏原位译文模式**：全宽沉浸式阅读原位译文 PDF。
+4. **⚡ 在线 PDF / arXiv 论文智能探测与全文 AI 导读**：
+   - 打开任意在线 `.pdf` 或 `arxiv.org/pdf/*` 论文页面时，右上角自动浮现**「🖼️ 沉浸式原位对照打开 PDF」**、**「🔦 聚光灯精读打开 PDF」**与**「⚡ arXiv 原生 HTML 双语版」**快捷胶囊。
+   - 内置 **Transformer 经典双栏学术论文示例 (`🧪 论文示例`)**、**`📌 全文总结`（AI 章节导读抽屉）**、**双语 Markdown 导出**与**打印级双语 PDF 导出**，且全面支持 PDF 内直接划词查词与发音。
+
+---
+
+## 🔍 划词精读、`Ctrl` 悬停单段译、网页总结与三击空格输入翻译
+
+- **视口防溢出划词浮窗（全场景穿透）**：在网页正文、视频总结面板或 PDF 阅读器中划选任意单词或句子，Shadow DOM 隔离浮窗即刻呈现（捕获阶段监听，不受内部组件事件阻断）；内置真实 DOM 边界测量与内部滚动容器，靠近屏幕边缘自动反向吸附。
+- **`Ctrl` 鼠标悬停单段即时翻译（指哪翻哪）**：无需开启整页翻译，将鼠标指针悬停在任意外文段落、推文或列表项上，轻按一下 `Ctrl` 键（亦支持 `Alt` 键），仅需 100ms 即可将该段原位展开双语译文；再按一下 `Ctrl` 键立即无损还原原文。
+- **✨ 网页/视频一键核心总结**：点击右侧悬浮球菜单中的 `✨ 总结此页/视频` 或右键菜单，即可一键提炼当前长文网页或视频的核心双语要点，点击要点直接平滑滚动定位至原文段落。
 - **权威释义、双音标与真人朗读**：集成英美双音标、词性释义、真人语音发音（TTS）及上下文整句翻译，支持中英双向互查与本地生词本收藏。
 - **三击空格输入框实时翻译 (`Space × 3`)**：在任意网页输入框、`textarea` 或富文本编辑器（Twitter/X、LinkedIn、GitHub、Discord、Gmail 等）中输入文本后**连续敲击三下空格键**，即可瞬间将输入内容原位翻译为目标语言。
 
@@ -109,7 +130,7 @@ flowchart TD
 
 ## 📊 全自动化测试矩阵 (100% 通过)
 
-本项目拥有完整的全自动化单元测试体系（**24 个测试套件，141 项测试用例**），全面覆盖网页翻译、社媒流、YouTube / Bilibili / 全网通用视频字幕与视频总结等核心场景：
+本项目拥有完整的全自动化单元测试体系（**25 个测试套件，149 项测试用例**），全面覆盖网页翻译、社媒流、双模式 PDF 论文阅读器、`Ctrl` 悬停单段译、YouTube / Bilibili / 全网通用视频字幕与视频总结等核心场景：
 
 | 测试套件文件 | 覆盖功能 / 边界场景 | 测试用例数 | 状态 |
 | :--- | :--- | :---: | :---: |
@@ -119,6 +140,7 @@ flowchart TD
 | [`tests/twitter_dm.test.ts`](tests/twitter_dm.test.ts) | Twitter 私信聊天气泡、发送者昵称、时间戳、操作按钮自适应翻译 | 10 | ✅ 通过 |
 | [`tests/youtube_extractor.test.ts`](tests/youtube_extractor.test.ts) | YouTube 字幕轨道选拔、ASR 逐词流断句合并、`json3`/`xml` 自适应解析 | 9 | ✅ 通过 |
 | [`tests/filter.test.ts`](tests/filter.test.ts) | 代码块/SVG/输入框跳过、参考文献过滤、多语种混合段落语义边界判定 | 9 | ✅ 通过 |
+| [`tests/pdf_and_hover.test.ts`](tests/pdf_and_hover.test.ts) | `PDFMathTranslate` 公式占位还原、双栏学术 PDF 几何聚类、`Ctrl` 悬停单段译、arXiv/PDF 探测条、网页总结 | 8 | ✅ 通过 |
 | [`tests/floating_ball.test.ts`](tests/floating_ball.test.ts) | 翻译王品牌悬浮球挂载、拖拽防抖、贴边半透明隐藏与状态同步 | 7 | ✅ 通过 |
 | [`tests/wikipedia.test.ts`](tests/wikipedia.test.ts) | 维基百科长文、TOC 锚点持久化、参考文献标题翻译、CSS 剥离 | 7 | ✅ 通过 |
 | [`tests/youtube_overlay.test.ts`](tests/youtube_overlay.test.ts) | YouTube 字幕图层挂载、悬停自动暂停、样式隔离与销毁还原 | 6 | ✅ 通过 |
@@ -137,7 +159,7 @@ flowchart TD
 | [`tests/toc_batch.test.ts`](tests/toc_batch.test.ts) | 复杂侧边目录批量并发转换与回写保护 | 1 | ✅ 通过 |
 | [`tests/usercell_debug.test.ts`](tests/usercell_debug.test.ts) | Twitter / X UserCell 个人简介与关注按钮专用提取 | 1 | ✅ 通过 |
 | [`tests/twitter_dm_screenshot.test.ts`](tests/twitter_dm_screenshot.test.ts) | Twitter 聊天视觉排版稳定性与截图回归 | 1 | ✅ 通过 |
-| **总计** | **24 个测试套件** | **141 / 141** | **100% 成功** |
+| **总计** | **25 个测试套件** | **149 / 149** | **100% 成功** |
 
 运行测试指令：
 ```bash

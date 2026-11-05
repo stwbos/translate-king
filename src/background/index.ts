@@ -131,6 +131,18 @@ chrome.runtime.onInstalled.addListener(() => {
     contexts: ['page']
   });
 
+  chrome.contextMenus.create({
+    id: 'translate-king-page-summary',
+    title: '翻译王：生成当前网页 / 视频核心总结',
+    contexts: ['page']
+  });
+
+  chrome.contextMenus.create({
+    id: 'translate-king-open-pdf',
+    title: '翻译王：使用双模式 PDF 阅读器打开 (沉浸式 / 聚光灯)',
+    contexts: ['page', 'link']
+  });
+
   if (chrome.tabs && chrome.scripting) {
     chrome.tabs.query({ url: ['http://*/*', 'https://*/*'] }, (tabs) => {
       if (chrome.runtime.lastError || !tabs) return;
@@ -152,6 +164,22 @@ chrome.runtime.onInstalled.addListener(() => {
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === 'translate-king-toggle' && tab?.id) {
     sendToggleToTabWithAutoHeal(tab.id, tab.url);
+  } else if (info.menuItemId === 'translate-king-page-summary' && tab?.id) {
+    chrome.tabs.sendMessage(tab.id, { type: 'OPEN_WEBPAGE_SUMMARY' }, () => {
+      if (chrome.runtime.lastError) {
+        // 忽略无法注入的系统页
+      }
+    });
+  } else if (info.menuItemId === 'translate-king-open-pdf') {
+    const targetFileUrl = info.linkUrl || tab?.url || '';
+    let studioUrl = chrome.runtime.getURL('pdf.html');
+    if (
+      targetFileUrl &&
+      (/\.pdf($|\?|#)/i.test(targetFileUrl) || /\/pdf\/\d+\.\d+/i.test(targetFileUrl))
+    ) {
+      studioUrl += `?file=${encodeURIComponent(targetFileUrl)}`;
+    }
+    chrome.tabs.create({ url: studioUrl });
   }
 });
 
